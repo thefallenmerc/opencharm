@@ -7,6 +7,10 @@ let package = Package(
     products: [.library(name: "RenderCore", targets: ["RenderCore"])],
     targets: [
         .target(name: "RenderCore"),
-        .testTarget(name: "RenderCoreTests", dependencies: ["RenderCore"]),
+        .testTarget(
+            name: "RenderCoreTests",
+            dependencies: ["RenderCore"],
+            resources: [.copy("Goldens")]
+        ),
     ]
 )
