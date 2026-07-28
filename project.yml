@@ -1,0 +1,39 @@
+name: OpenCharm
+options:
+  bundleIdPrefix: com.thefallenmerc
+  deploymentTarget:
+    macOS: "14.0"
+packages:
+  RenderCore: { path: Packages/RenderCore }
+  AudioPipeline: { path: Packages/AudioPipeline }
+  ProjectStore: { path: Packages/ProjectStore }
+  Recording: { path: Packages/Recording }
+targets:
+  OpenCharm:
+    type: application
+    platform: macOS
+    sources: [App]
+    dependencies:
+      - package: RenderCore
+      - package: AudioPipeline
+      - package: ProjectStore
+      - package: Recording
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thefallenmerc.OpenCharm
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_NSCameraUsageDescription: "OpenCharm records your webcam to overlay it on screen recordings."
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "OpenCharm records your microphone narration."
+        CODE_SIGN_ENTITLEMENTS: App/OpenCharm.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Automatic
+schemes:
+  OpenCharm:
+    build:
+      targets:
+        OpenCharm: all
+    run:
+      config: Debug
