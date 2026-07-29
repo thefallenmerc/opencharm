@@ -6,3 +6,7 @@ xcuserdata/
 .build/
 DerivedData/
 dist/
+
+# RNNoise model weights (~74 MB generated C): fetched by
+# Tools/fetch-rnnoise-model.sh (run via `make fetch-model`), never committed.
+Packages/AudioPipeline/Sources/CRNNoise/rnnoise_data.c
