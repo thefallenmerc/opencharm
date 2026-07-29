@@ -1,22 +1,15 @@
 // swift-tools-version: 5.10
-import Foundation
 import PackageDescription
 
-// The RNNoise trained-model weights (~74 MB of generated C) are not vendored
-// in git; `Tools/fetch-rnnoise-model.sh` downloads and checksum-verifies them
-// (run automatically by `make gen`/`make build`/`make test`). Fail fast with
-// an actionable message rather than a confusing link error if someone
-// invokes `swift build`/`swift test` directly without having fetched it.
-let rnnoiseDataC = URL(fileURLWithPath: #filePath)
-    .deletingLastPathComponent()
-    .appendingPathComponent("Sources/CRNNoise/rnnoise_data.c")
-if !FileManager.default.fileExists(atPath: rnnoiseDataC.path) {
-    fatalError("""
-        Missing \(rnnoiseDataC.path)
-        (RNNoise model weights). Run `make fetch-model` from the repo root \
-        to download and verify it, then retry.
-        """)
-}
+// Note: the RNNoise trained-model weights (Sources/CRNNoise/rnnoise_data.c,
+// ~74 MB, not committed — see .gitignore) are fetched at build time by
+// Tools/fetch-rnnoise-model.sh (`make fetch-model`, a dependency of
+// `make gen`/`build`/`test`). If it's missing, CRNNoise/opencharm_model_guard.c
+// fails compilation with a clear `#error` rather than failing manifest
+// evaluation here — a manifest-level guard would crash package-graph
+// resolution (and thus Xcode, SourceKit, `swift package describe/resolve`,
+// and any sibling package that merely depends on AudioPipeline by path) for
+// the whole graph, not just an actual attempt to build this target.
 
 let package = Package(
     name: "AudioPipeline",
