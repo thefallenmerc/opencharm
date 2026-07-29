@@ -53,4 +53,43 @@ final class CompositorCanvasTests: XCTestCase {
                                       settings: s, canvasSize: CGSize(width: 320, height: 200))
         try GoldenAssert.compare(out, name: "canvas_bare")
     }
+
+    /// Every alpha byte in the rendered output, sampled via premultipliedLast RGBA8.
+    private func alphaBytes(_ image: CIImage) -> [UInt8] {
+        let cg = GoldenAssert.cgImage(image)
+        var data = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+        let ctx = CGContext(data: &data, width: cg.width, height: cg.height,
+                            bitsPerComponent: 8, bytesPerRow: cg.width * 4,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        return stride(from: 3, to: data.count, by: 4).map { data[$0] }
+    }
+
+    /// Output must always be opaque, even when a caller passes a semi-transparent solid
+    /// background color — the render contract promises fully-opaque output regardless of input.
+    func testOutputIsOpaqueWithSemiTransparentSolidBackground() throws {
+        var s = settings
+        s.background = .solid(RGBAColor(r: 0.5, g: 0.3, b: 0.6, a: 0.3))
+        s.shadow.opacity = 0 // isolate the background-alpha path
+        let out = Compositor().render(RenderInputs(screen: syntheticScreen()),
+                                      settings: s, canvasSize: CGSize(width: 400, height: 260))
+        XCTAssertTrue(alphaBytes(out).allSatisfy { $0 == 255 },
+                      "All output pixels must be fully opaque (alpha 255) even with a < 1 solid background")
+    }
+
+    /// Output must always be opaque even when the caller-supplied backgroundImage (e.g. a
+    /// wallpaper PNG with transparent corners) carries its own per-pixel alpha < 1.
+    func testOutputIsOpaqueWithSemiTransparentImageBackground() throws {
+        var s = settings
+        s.background = .image(path: "ignored-caller-resolves")
+        s.shadow.opacity = 0
+        let bg = CIImage(color: CIColor(red: 0.1, green: 0.5, blue: 0.2, alpha: 0.4))
+            .cropped(to: CGRect(x: 0, y: 0, width: 100, height: 100))
+        let out = Compositor().render(
+            RenderInputs(screen: syntheticScreen(), backgroundImage: bg),
+            settings: s, canvasSize: CGSize(width: 400, height: 260))
+        XCTAssertTrue(alphaBytes(out).allSatisfy { $0 == 255 },
+                      "All output pixels must be fully opaque (alpha 255) even with a semi-transparent backgroundImage")
+    }
 }

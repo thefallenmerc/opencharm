@@ -34,6 +34,10 @@ public final class Compositor {
         result = place(inputs.screen, in: layout.contentRect,
                        cornerRadius: layout.cornerRadius, over: result)
         result = webcamLayer(inputs.webcam, settings: settings, layout: layout, over: result)
+        // Contract: output is always opaque, regardless of any alpha < 1 in caller-supplied
+        // inputs (e.g. a semi-transparent solid/gradient color or a backgroundImage with alpha).
+        let opaqueBackdrop = CIImage(color: .black).cropped(to: canvasRect)
+        result = result.composited(over: opaqueBackdrop)
         return result.cropped(to: canvasRect)
     }
 
