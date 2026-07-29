@@ -119,13 +119,10 @@ public final class Compositor {
         let square = webcam.cropped(to: crop)
         var result = background
         if settings.shadow.opacity > 0 {
-            let f = CIFilter.roundedRectangleGenerator()
-            f.extent = layout.webcamRect
-            f.radius = Float(layout.webcamCornerRadius)
-            f.color = CIColor(red: 0, green: 0, blue: 0, alpha: settings.shadow.opacity)
-            result = f.outputImage!
-                .applyingGaussianBlur(sigma: layout.shadowBlurSigma * 0.6)
-                .transformed(by: .init(translationX: 0, y: -layout.shadowOffsetY * 0.6))
+            result = shadow(for: layout.webcamRect, radius: layout.webcamCornerRadius,
+                            opacity: settings.shadow.opacity * 0.6,
+                            blurSigma: layout.shadowBlurSigma * 0.6,
+                            offsetY: layout.shadowOffsetY * 0.6)
                 .composited(over: result)
         }
         return place(square, in: layout.webcamRect,
