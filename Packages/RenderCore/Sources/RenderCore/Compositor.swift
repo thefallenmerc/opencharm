@@ -109,9 +109,26 @@ public final class Compositor {
         return blend.outputImage!
     }
 
-    /// Webcam bubble — implemented in Task 5. Until then, pass-through.
     func webcamLayer(_ webcam: CIImage?, settings: RenderSettings,
                      layout: CanvasLayout, over background: CIImage) -> CIImage {
-        background
+        guard settings.webcam.visible, let webcam else { return background }
+        // Center-crop to square.
+        let side = min(webcam.extent.width, webcam.extent.height)
+        let crop = CGRect(x: webcam.extent.midX - side / 2,
+                          y: webcam.extent.midY - side / 2, width: side, height: side)
+        let square = webcam.cropped(to: crop)
+        var result = background
+        if settings.shadow.opacity > 0 {
+            let f = CIFilter.roundedRectangleGenerator()
+            f.extent = layout.webcamRect
+            f.radius = Float(layout.webcamCornerRadius)
+            f.color = CIColor(red: 0, green: 0, blue: 0, alpha: settings.shadow.opacity)
+            result = f.outputImage!
+                .applyingGaussianBlur(sigma: layout.shadowBlurSigma * 0.6)
+                .transformed(by: .init(translationX: 0, y: -layout.shadowOffsetY * 0.6))
+                .composited(over: result)
+        }
+        return place(square, in: layout.webcamRect,
+                     cornerRadius: layout.webcamCornerRadius, over: result)
     }
 }
