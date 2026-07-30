@@ -19,4 +19,26 @@ final class AudioCacheTests: XCTestCase {
         let mtime2 = try FileManager.default.attributesOfItem(atPath: url2.path)[.modificationDate] as! Date
         XCTAssertEqual(mtime1, mtime2, "second call must hit the cache")
     }
+
+    /// A generation failure must not leave a broken file at the cache path —
+    /// `processedURL`'s cache-hit check is a plain `fileExists`, so any file
+    /// left there after a failed `process` call would be treated as valid
+    /// forever. `AudioProcessor.process`/`enhance`/`writeMono48k` only publish
+    /// their output atomically on full success, so a throw here must leave no
+    /// file behind for a future call to (wrongly) trust.
+    func testFailedGenerationDoesNotPoisonTheCache() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cache-fail-\(UUID().uuidString)")
+        let badSrc = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bad-\(UUID().uuidString).caf")
+        try Data("garbage".utf8).write(to: badSrc)
+
+        XCTAssertThrowsError(
+            try AudioCache.processedURL(for: badSrc, cacheDir: dir, denoise: false, enhance: true))
+
+        let expected = dir.appendingPathComponent(
+            "\(badSrc.deletingPathExtension().lastPathComponent).d0e1.caf")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: expected.path),
+                       "a failed generation must not leave a broken file at the cache path")
+    }
 }

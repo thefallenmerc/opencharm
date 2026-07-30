@@ -54,4 +54,106 @@ final class EnhanceTests: XCTestCase {
         try AudioProcessor.process(input: input, output: out, denoise: true, enhance: true)
         XCTAssertEqual(try AVAudioFile(forReading: out).processingFormat.sampleRate, 48_000)
     }
+
+    /// `enhance` computes its total render-frame count from a sample-rate ratio
+    /// (`file.length * 48_000 / file.processingFormat.sampleRate`); every other
+    /// fixture in this file is already 48 kHz, so that ratio is always 1.0 and
+    /// this arithmetic has never actually been exercised at ratio != 1.0. Drives
+    /// a 44.1 kHz mono fixture through the real AVAudioEngine offline-render
+    /// chain (not `readMono48k`'s AVAudioConverter path, which is separately
+    /// covered by DenoiseTests) to confirm it still resamples to 48 kHz mono
+    /// without truncating or corrupting the duration.
+    func testEnhanceHandlesNonNativeSampleRateInput() throws {
+        let sr = 44_100.0
+        let seconds = 1.5
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sr,
+                                   channels: 1, interleaved: false)!
+        let frames = AVAudioFrameCount(sr * seconds)
+        let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
+        buf.frameLength = frames
+        let p = buf.floatChannelData![0]
+        for i in 0..<Int(frames) {
+            let t = Double(i) / sr
+            p[i] = Float(sin(2 * .pi * 300 * t)) * 0.3
+        }
+        let input = FileManager.default.temporaryDirectory
+            .appendingPathComponent("in44k-\(UUID().uuidString).caf")
+        let inFile = try AVAudioFile(forWriting: input, settings: format.settings,
+                                     commonFormat: .pcmFormatFloat32, interleaved: false)
+        try inFile.write(from: buf)
+
+        let output = FileManager.default.temporaryDirectory
+            .appendingPathComponent("enh44k-\(UUID().uuidString).caf")
+        try AudioProcessor.enhance(input: input, output: output)
+
+        let outFile = try AVAudioFile(forReading: output)
+        XCTAssertEqual(outFile.processingFormat.sampleRate, 48_000)
+        XCTAssertEqual(outFile.processingFormat.channelCount, 1)
+        let outSeconds = Double(outFile.length) / 48_000
+        XCTAssertEqual(outSeconds, seconds, accuracy: 0.1,
+                       "output duration \(outSeconds)s should be ~\(seconds)s")
+    }
+
+    /// `process`'s (true,true) branch is covered by testProcessChainAndPassthrough
+    /// above; this covers the other three dispatch branches so all four are
+    /// exercised — each must produce a readable 48 kHz mono CAF of the input's
+    /// duration.
+    func testProcessDispatchBranches() throws {
+        let sr = 48_000.0
+        let seconds = 0.5
+        var samples = [Float](repeating: 0, count: Int(sr * seconds))
+        for i in samples.indices {
+            samples[i] = Float(sin(Double(i) * 0.1)) * 0.3
+        }
+        let input = FileManager.default.temporaryDirectory
+            .appendingPathComponent("proc-in-\(UUID().uuidString).caf")
+        try AudioProcessor.writeMono48k(samples, to: input)
+
+        let cases: [(denoise: Bool, enhance: Bool)] = [
+            (false, false), (true, false), (false, true),
+        ]
+        for c in cases {
+            let output = FileManager.default.temporaryDirectory
+                .appendingPathComponent("proc-out-\(UUID().uuidString).caf")
+            try AudioProcessor.process(input: input, output: output,
+                                       denoise: c.denoise, enhance: c.enhance)
+            let outFile = try AVAudioFile(forReading: output)
+            XCTAssertEqual(outFile.processingFormat.sampleRate, 48_000,
+                           "denoise=\(c.denoise) enhance=\(c.enhance)")
+            XCTAssertEqual(outFile.processingFormat.channelCount, 1,
+                           "denoise=\(c.denoise) enhance=\(c.enhance)")
+            let outSeconds = Double(outFile.length) / 48_000
+            XCTAssertEqual(outSeconds, seconds, accuracy: 0.05,
+                           "denoise=\(c.denoise) enhance=\(c.enhance): duration \(outSeconds)s")
+        }
+    }
+
+    /// A mid-generation failure must never leave a partial/corrupt file at
+    /// `output`: `enhance` renders to a temp file and only moves it into place
+    /// on full success. Verifies both halves — the pre-existing destination is
+    /// untouched, and no `.tmp-*` file is left behind — using an input that
+    /// makes `AVAudioFile(forReading:)` throw before any rendering happens.
+    func testEnhanceFailureLeavesExistingOutputUntouchedAndNoTempLitter() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("atomic-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let output = dir.appendingPathComponent("out.caf")
+        let sentinel = Data("not a real caf".utf8)
+        try sentinel.write(to: output)
+
+        let badInput = dir.appendingPathComponent("bad-input.caf")
+        try Data("garbage".utf8).write(to: badInput)
+
+        XCTAssertThrowsError(try AudioProcessor.enhance(input: badInput, output: output))
+
+        // Output must be exactly what it was before the failed call — never
+        // partially overwritten.
+        XCTAssertEqual(try Data(contentsOf: output), sentinel)
+
+        // No `.tmp-*` leftovers in the destination directory.
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+            .filter { $0.hasPrefix(".tmp-") }
+        XCTAssertTrue(leftovers.isEmpty, "temp files left behind: \(leftovers)")
+    }
 }

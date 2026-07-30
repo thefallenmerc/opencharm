@@ -1,6 +1,12 @@
 import AVFoundation
+import AudioToolbox
 
-public enum AudioProcessorError: Error { case unreadable(URL), conversionFailed }
+public enum AudioProcessorError: Error {
+    case unreadable(URL)
+    case conversionFailed
+    /// Offline manual rendering returned a non-`.success` status.
+    case renderFailed(AVAudioEngineManualRenderingStatus)
+}
 
 public enum AudioProcessor {
     static let workFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000,
@@ -28,6 +34,12 @@ public enum AudioProcessor {
     }
 
     /// High-pass at 80 Hz, gentle presence lift, dynamics compression. Offline render.
+    ///
+    /// Renders to a temp file beside `output` and only moves it into place once
+    /// rendering fully succeeds — a mid-render failure (engine start, a
+    /// non-`.success` render status, a write error) never leaves a partial/corrupt
+    /// file sitting at `output`, which `AudioCache` would otherwise treat as a
+    /// permanent (and broken) cache hit via its `fileExists` check.
     public static func enhance(input: URL, output: URL) throws {
         let engine = AVAudioEngine()
         let player = AVAudioPlayerNode()
@@ -48,9 +60,14 @@ public enum AudioProcessor {
 
         let file = try AVAudioFile(forReading: input)
         engine.attach(player); engine.attach(eq); engine.attach(comp)
+        pinDynamicsProcessorDefaults(comp)
         engine.connect(player, to: eq, format: file.processingFormat)
         engine.connect(eq, to: comp, format: file.processingFormat)
         engine.connect(comp, to: engine.mainMixerNode, format: file.processingFormat)
+        // Registered before any throwing call below so a failure at any point
+        // (enable-rendering-mode, start, mid-render) still stops the engine —
+        // both calls are safe no-ops if the engine never actually started.
+        defer { player.stop(); engine.stop() }
 
         try engine.enableManualRenderingMode(.offline, format: workFormat,
                                              maximumFrameCount: 4096)
@@ -58,8 +75,10 @@ public enum AudioProcessor {
         player.scheduleFile(file, at: nil)
         player.play()
 
-        try? FileManager.default.removeItem(at: output)
-        let outFile = try AVAudioFile(forWriting: output, settings: workFormat.settings,
+        let tmp = output.deletingLastPathComponent()
+            .appendingPathComponent(".tmp-\(UUID().uuidString).caf")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let outFile = try AVAudioFile(forWriting: tmp, settings: workFormat.settings,
                                       commonFormat: .pcmFormatFloat32, interleaved: false)
         let renderBuf = AVAudioPCMBuffer(pcmFormat: engine.manualRenderingFormat,
                                          frameCapacity: 4096)!
@@ -68,10 +87,37 @@ public enum AudioProcessor {
         while engine.manualRenderingSampleTime < total {
             let toRender = AVAudioFrameCount(min(4096, total - engine.manualRenderingSampleTime))
             let status = try engine.renderOffline(toRender, to: renderBuf)
-            guard status == .success else { break }
+            guard status == .success else {
+                throw AudioProcessorError.renderFailed(status)
+            }
             try outFile.write(from: renderBuf)
         }
-        player.stop(); engine.stop()
+        // Full render succeeded: atomically publish. `moveItem` is a rename on
+        // the same volume (both paths share `output`'s directory), so `output`
+        // is never observable in a partial state by a concurrent reader (e.g.
+        // another `AudioCache.processedURL` caller's `fileExists` check).
+        try? FileManager.default.removeItem(at: output)
+        try FileManager.default.moveItem(at: tmp, to: output)
+    }
+
+    /// Pins Apple's `AUDynamicsProcessor` to its documented factory-default
+    /// parameter values (see `AudioUnitParameters.h`: Threshold -20 dB, HeadRoom
+    /// 5 dB, ExpansionRatio 2, AttackTime 0.001 s, ReleaseTime 0.05 s, OverallGain
+    /// 0 dB) so `enhance`'s output is deterministic across macOS versions instead
+    /// of riding on whatever the AU happens to initialize its parameters to.
+    private static func pinDynamicsProcessorDefaults(_ comp: AVAudioUnitEffect) {
+        let au = comp.audioUnit
+        let defaults: [(AudioUnitParameterID, AudioUnitParameterValue)] = [
+            (kDynamicsProcessorParam_Threshold, -20),    // dB,   range -40...20
+            (kDynamicsProcessorParam_HeadRoom, 5),        // dB,   range 0.1...40
+            (kDynamicsProcessorParam_ExpansionRatio, 2),  // rate, range 1...50
+            (kDynamicsProcessorParam_AttackTime, 0.001),  // secs, range 0.0001...0.2
+            (kDynamicsProcessorParam_ReleaseTime, 0.05),  // secs, range 0.01...3
+            (kDynamicsProcessorParam_OverallGain, 0),     // dB,   range -40...40
+        ]
+        for (id, value) in defaults {
+            AudioUnitSetParameter(au, id, kAudioUnitScope_Global, 0, value, 0)
+        }
     }
 
     /// Full chain used by the app. Both flags false → normalize to 48k mono only.
@@ -123,9 +169,16 @@ public enum AudioProcessor {
         return result
     }
 
+    /// Writes to a temp file beside `url` and atomically moves it into place only
+    /// once the write fully succeeds, so a mid-write failure never leaves a
+    /// partial file at `url`. This is the shared final-write step for `denoise`
+    /// and `process`'s passthrough branch, so both inherit the same atomicity
+    /// guarantee as `enhance`.
     static func writeMono48k(_ samples: [Float], to url: URL) throws {
-        try? FileManager.default.removeItem(at: url)
-        let file = try AVAudioFile(forWriting: url, settings: workFormat.settings,
+        let tmp = url.deletingLastPathComponent()
+            .appendingPathComponent(".tmp-\(UUID().uuidString).caf")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let file = try AVAudioFile(forWriting: tmp, settings: workFormat.settings,
                                    commonFormat: .pcmFormatFloat32, interleaved: false)
         let buf = AVAudioPCMBuffer(pcmFormat: workFormat,
                                    frameCapacity: AVAudioFrameCount(samples.count))!
@@ -134,5 +187,7 @@ public enum AudioProcessor {
             buf.floatChannelData![0].update(from: $0.baseAddress!, count: samples.count)
         }
         try file.write(from: buf)
+        try? FileManager.default.removeItem(at: url)
+        try FileManager.default.moveItem(at: tmp, to: url)
     }
 }
