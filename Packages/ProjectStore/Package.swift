@@ -11,6 +11,10 @@ let package = Package(
     ],
     targets: [
         .target(name: "ProjectStore", dependencies: ["RenderCore", "AudioPipeline"]),
-        .testTarget(name: "ProjectStoreTests", dependencies: ["ProjectStore"]),
+        .testTarget(
+            name: "ProjectStoreTests",
+            dependencies: ["ProjectStore"],
+            resources: [.copy("Fixtures")]
+        ),
     ]
 )

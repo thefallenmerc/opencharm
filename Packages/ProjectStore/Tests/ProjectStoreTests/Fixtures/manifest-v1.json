@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "createdAt": 1754000000,
+  "screen": { "filename": "screen.mov", "startOffset": 0 },
+  "mic": { "filename": "mic.caf", "startOffset": 0.02 },
+  "renderSettings": {
+    "background": { "solid": { "_0": { "r": 0.1, "g": 0.1, "b": 0.12, "a": 1 } } },
+    "paddingFraction": 0.06,
+    "cornerRadiusFraction": 0.02,
+    "shadow": { "opacity": 0.45, "radius": 0.03, "offsetY": 0.012 },
+    "webcam": { "visible": true, "center": [0.87, 0.82], "size": 0.24, "roundness": 1 }
+  },
+  "audioSettings": { "noiseRemoval": true, "voiceEnhance": true, "micVolume": 1, "systemVolume": 1 }
+}
