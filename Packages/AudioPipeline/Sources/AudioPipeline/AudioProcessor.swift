@@ -27,6 +27,71 @@ public enum AudioProcessor {
         try writeMono48k(out, to: output)
     }
 
+    /// High-pass at 80 Hz, gentle presence lift, dynamics compression. Offline render.
+    public static func enhance(input: URL, output: URL) throws {
+        let engine = AVAudioEngine()
+        let player = AVAudioPlayerNode()
+        let eq = AVAudioUnitEQ(numberOfBands: 2)
+        eq.bands[0].filterType = .highPass
+        eq.bands[0].frequency = 80
+        eq.bands[0].bypass = false
+        eq.bands[1].filterType = .parametric
+        eq.bands[1].frequency = 3000
+        eq.bands[1].bandwidth = 1.0
+        eq.bands[1].gain = 2.5
+        eq.bands[1].bypass = false
+        let comp = AVAudioUnitEffect(audioComponentDescription: AudioComponentDescription(
+            componentType: kAudioUnitType_Effect,
+            componentSubType: kAudioUnitSubType_DynamicsProcessor,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0, componentFlagsMask: 0))
+
+        let file = try AVAudioFile(forReading: input)
+        engine.attach(player); engine.attach(eq); engine.attach(comp)
+        engine.connect(player, to: eq, format: file.processingFormat)
+        engine.connect(eq, to: comp, format: file.processingFormat)
+        engine.connect(comp, to: engine.mainMixerNode, format: file.processingFormat)
+
+        try engine.enableManualRenderingMode(.offline, format: workFormat,
+                                             maximumFrameCount: 4096)
+        try engine.start()
+        player.scheduleFile(file, at: nil)
+        player.play()
+
+        try? FileManager.default.removeItem(at: output)
+        let outFile = try AVAudioFile(forWriting: output, settings: workFormat.settings,
+                                      commonFormat: .pcmFormatFloat32, interleaved: false)
+        let renderBuf = AVAudioPCMBuffer(pcmFormat: engine.manualRenderingFormat,
+                                         frameCapacity: 4096)!
+        let total = AVAudioFramePosition(
+            Double(file.length) * 48_000 / file.processingFormat.sampleRate)
+        while engine.manualRenderingSampleTime < total {
+            let toRender = AVAudioFrameCount(min(4096, total - engine.manualRenderingSampleTime))
+            let status = try engine.renderOffline(toRender, to: renderBuf)
+            guard status == .success else { break }
+            try outFile.write(from: renderBuf)
+        }
+        player.stop(); engine.stop()
+    }
+
+    /// Full chain used by the app. Both flags false → normalize to 48k mono only.
+    public static func process(input: URL, output: URL, denoise: Bool, enhance: Bool) throws {
+        let tmp = output.deletingLastPathComponent()
+            .appendingPathComponent(".tmp-\(UUID().uuidString).caf")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        switch (denoise, enhance) {
+        case (false, false):
+            try writeMono48k(try readMono48k(input), to: output)
+        case (true, false):
+            try Self.denoise(input: input, output: output)
+        case (false, true):
+            try Self.enhance(input: input, output: output)
+        case (true, true):
+            try Self.denoise(input: input, output: tmp)
+            try Self.enhance(input: tmp, output: output)
+        }
+    }
+
     // MARK: shared PCM I/O (Task 7 reuses these)
 
     static func readMono48k(_ url: URL) throws -> [Float] {
