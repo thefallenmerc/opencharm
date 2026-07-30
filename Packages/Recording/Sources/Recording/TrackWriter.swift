@@ -11,6 +11,7 @@ public final class TrackWriter {
     private var input: AVAssetWriterInput?
     private let kind: Kind
     private let queue = DispatchQueue(label: "trackwriter")
+    private var isFinishing = false
     public private(set) var firstPTSSeconds: Double?
 
     public init(url: URL, kind: Kind) throws {
@@ -25,10 +26,15 @@ public final class TrackWriter {
         }
     }
 
+    /// Real-time writer: buffers arriving while the input is not ready — e.g. a
+    /// ScreenCaptureKit catch-up burst delivered after a display stall, or any buffer
+    /// appended after `finish()` has begun tearing the input down — are dropped by
+    /// design rather than queued or blocked on. Callers must feed buffers at capture
+    /// cadence and must not treat `append` as lossless.
     public func append(_ sampleBuffer: CMSampleBuffer) {
         queue.sync {
             if input == nil { start(with: sampleBuffer) }
-            guard writer.status == .writing, let input, input.isReadyForMoreMediaData else { return }
+            guard !isFinishing, writer.status == .writing, let input, input.isReadyForMoreMediaData else { return }
             input.append(sampleBuffer)
         }
     }
@@ -68,6 +74,7 @@ public final class TrackWriter {
                 guard writer.status == .writing else {
                     cont.resume(); return
                 }
+                isFinishing = true
                 input?.markAsFinished()
                 writer.finishWriting {
                     if let error = self.writer.error { cont.resume(throwing: error) }

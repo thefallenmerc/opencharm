@@ -46,4 +46,59 @@ final class TrackWriterTests: XCTestCase {
         XCTAssertEqual(Double(file.length) / file.processingFormat.sampleRate, 1.0, accuracy: 0.05)
         XCTAssertEqual(writer.firstPTSSeconds!, start.seconds, accuracy: 0.001)
     }
+
+    /// `finish()` marks the input finished and kicks off `finishWriting` asynchronously;
+    /// `writer.status` stays `.writing` until that completion fires. Apple's documented contract
+    /// for `markAsFinished()` is "do not append additional samples to the input" after calling
+    /// it — so any `append(_:)` a producer fires concurrently with `finish()` (e.g. a capture
+    /// delegate callback on its own queue racing a "stop recording" call) must never reach
+    /// `input.append`. `isFinishing` enforces that explicitly, inside the same serial-queue
+    /// critical section as `markAsFinished()`, rather than relying on `isReadyForMoreMediaData`
+    /// happening to already reflect "finished" state.
+    ///
+    /// The background task loops on `!Task.isCancelled` rather than a fixed count, and is only
+    /// cancelled after `finish()` returns, so it is guaranteed to still be actively appending —
+    /// not finished early, not not-yet-started — for the writer's entire teardown window,
+    /// forcing genuine overlap instead of relying on timing luck. A `DispatchSemaphore` confirms
+    /// the racer has actually started before `finish()` is invoked. Repeats 10 times to shake out
+    /// scheduling variance; asserts no crash and the resulting file stays valid.
+    func testConcurrentAppendDuringFinishDoesNotCrash() async throws {
+        for _ in 0..<10 {
+            let url = tempURL("caf")
+            let writer = try TrackWriter(url: url, kind: .passthroughAudio)
+            let start = CMClockGetTime(CMClockGetHostTimeClock())
+
+            // Prime the writer so a session is already open before the race begins.
+            for i in 0..<3 {
+                let pts = CMTimeAdd(start, CMTime(value: CMTimeValue(i * 4800), timescale: 48_000))
+                writer.append(SampleBufferFactory.audioBuffer(pts: pts))
+            }
+
+            let started = DispatchSemaphore(value: 0)
+            let appendTask = Task.detached {
+                started.signal()
+                var i = 3
+                while !Task.isCancelled {
+                    let pts = CMTimeAdd(start, CMTime(value: CMTimeValue(i * 4800), timescale: 48_000))
+                    writer.append(SampleBufferFactory.audioBuffer(pts: pts))
+                    i += 1
+                }
+            }
+            // Bridge the blocking semaphore wait off the async context so we confirm the racer
+            // has actually started (not just been submitted) before racing `finish()` against it.
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                DispatchQueue.global().async {
+                    started.wait()
+                    cont.resume()
+                }
+            }
+
+            try await writer.finish()
+            appendTask.cancel()
+            _ = await appendTask.value
+
+            let file = try AVAudioFile(forReading: url)
+            XCTAssertGreaterThan(file.length, 0)
+        }
+    }
 }
