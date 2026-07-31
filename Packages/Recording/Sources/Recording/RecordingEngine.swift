@@ -15,12 +15,18 @@ public final class RecordingEngine: ObservableObject {
     private var mic: MicRecorder?
     private var events: EventLogger?
     private var offsetsTask: Task<Void, Never>?
+    /// Whether the current recording is expected to produce a system-audio track. Derived
+    /// from configuration at `start` time — must NOT be derived from `pkg.manifest.systemAudio`
+    /// (that value is only ever set by `writeOffsetsIfComplete` itself, so gating completeness
+    /// on it would be a tautology that always reads as "not yet active" until the very write
+    /// that's supposed to be gated).
+    private var capturesSystemAudio = false
 
     public init() {}
 
     public func start(configuration: RecordingConfiguration, projectURL: URL) async throws {
         guard case .idle = state else { return }
-        var pkg = try ProjectPackage.create(at: projectURL)
+        let pkg = try ProjectPackage.create(at: projectURL)
         try pkg.markRecordingStarted()
 
         let screen = ScreenRecorder(
@@ -28,25 +34,39 @@ public final class RecordingEngine: ObservableObject {
             videoURL: pkg.screenURL,
             systemAudioURL: configuration.capturesSystemAudio ? pkg.systemAudioURL : nil)
         var webcam: WebcamRecorder?
-        if let camID = configuration.webcamDeviceID {
-            webcam = try WebcamRecorder(deviceID: camID, outputURL: pkg.webcamURL)
-        }
         var mic: MicRecorder?
-        if let micID = configuration.micDeviceID {
-            mic = try MicRecorder(deviceID: micID, outputURL: pkg.micURL)
-        }
         let events = EventLogger(fileURL: pkg.eventsURL)
 
-        try await screen.start()
-        try await webcam?.start()
-        try mic?.start()
-        events.start()
+        do {
+            if let camID = configuration.webcamDeviceID {
+                webcam = try WebcamRecorder(deviceID: camID, outputURL: pkg.webcamURL)
+            }
+            if let micID = configuration.micDeviceID {
+                mic = try MicRecorder(deviceID: micID, outputURL: pkg.micURL)
+            }
+            try await screen.start()
+            try await webcam?.start()
+            try mic?.start()
+            events.start()
+        } catch {
+            // A later source failed after an earlier one already started (e.g. webcam
+            // fails after screen's SCStream is live): stop whatever did start so nothing
+            // is orphaned, drop the lock so this isn't mistaken for an interrupted
+            // recording, and leave the engine usable again.
+            try? await screen.stop()
+            try? await webcam?.stop()
+            try? await mic?.stop()
+            try? pkg.markRecordingFinished()
+            state = .idle
+            throw error
+        }
 
         self.package = pkg
         self.screen = screen
         self.webcam = webcam
         self.mic = mic
         self.events = events
+        self.capturesSystemAudio = configuration.capturesSystemAudio
         self.webcamPreviewLayer = webcam?.previewLayer
         state = .recording(startedAt: Date())
 
@@ -65,11 +85,10 @@ public final class RecordingEngine: ObservableObject {
     @discardableResult
     private func writeOffsetsIfComplete() -> Bool {
         guard var pkg = package, let screen else { return false }
-        let sysActive = pkg.manifest.systemAudio != nil || screen.audioFirstPTS != nil
         guard let videoPTS = screen.videoFirstPTS,
               (webcam == nil || webcam?.firstPTS != nil),
               (mic == nil || mic?.firstPTS != nil),
-              (!sysActive || screen.audioFirstPTS != nil) else { return false }
+              (!capturesSystemAudio || screen.audioFirstPTS != nil) else { return false }
 
         var candidates = [videoPTS]
         [webcam?.firstPTS, mic?.firstPTS, screen.audioFirstPTS]
@@ -98,22 +117,39 @@ public final class RecordingEngine: ObservableObject {
         }
         state = .stopping
         offsetsTask?.cancel()
-        try await screen?.stop()
-        try await webcam?.stop()
-        try await mic?.stop()
+
+        // Best-effort every step: a failure partway through (any recorder's stop,
+        // finalize, or manifest save) must not leave the engine stuck in `.stopping`
+        // or skip writing whatever crash-safe artifacts are already available. Collect
+        // the first error and rethrow it only after the full teardown/finalize path has
+        // run, so the caller still gets a usable package back on the happy path and the
+        // engine is always left in `.idle`.
+        var firstError: Error?
+        func record(_ error: Error) { if firstError == nil { firstError = error } }
+
+        do { try await screen?.stop() } catch { record(error) }
+        do { try await webcam?.stop() } catch { record(error) }
+        do { try await mic?.stop() } catch { record(error) }
+
         writeOffsetsIfComplete()
-        pkg = package! // refreshed by writeOffsetsIfComplete
-        if let events, let epoch = events.epoch {
-            try events.finalize(epoch: epoch)
-        } else {
-            try events?.finalize(epoch: 0)
-        }
-        try pkg.markRecordingFinished()
-        try pkg.saveManifest()
+        pkg = package ?? pkg // refreshed by writeOffsetsIfComplete when it succeeded
+
+        do {
+            if let events, let epoch = events.epoch {
+                try events.finalize(epoch: epoch)
+            } else {
+                try events?.finalize(epoch: 0)
+            }
+        } catch { record(error) }
+
+        do { try pkg.markRecordingFinished() } catch { record(error) }
+        do { try pkg.saveManifest() } catch { record(error) }
 
         (screen, webcam, mic, events, webcamPreviewLayer) = (nil, nil, nil, nil, nil)
         package = nil
         state = .idle
+
+        if let firstError { throw firstError }
         return pkg
     }
 }
