@@ -30,7 +30,7 @@ public final class EventLogger {
         func handle(_ event: NSEvent) {
             let now = CMClockGetTime(CMClockGetHostTimeClock()).seconds
             let screenH = NSScreen.screens.first?.frame.height ?? 0
-            let loc = NSEvent.mouseLocation // bottom-left origin global coords
+            let loc = NSEvent.mouseLocation // bottom-left → top-left: Quartz global space (primary-anchored)
             let type: String
             switch event.type {
             case .leftMouseDown, .rightMouseDown: type = "down"
@@ -39,8 +39,12 @@ public final class EventLogger {
             }
             self.log(LoggedEvent(t: now, x: loc.x, y: screenH - loc.y, type: type))
         }
-        monitors.append(NSEvent.addGlobalMonitorForEvents(matching: mask) { handle($0) } as Any)
-        monitors.append(NSEvent.addLocalMonitorForEvents(matching: mask) { handle($0); return $0 } as Any)
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { handle($0) }) {
+            monitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { handle($0); return $0 }) {
+            monitors.append(local)
+        }
     }
 
     public func log(_ event: LoggedEvent) {
