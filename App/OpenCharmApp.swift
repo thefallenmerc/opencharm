@@ -5,9 +5,11 @@ struct OpenCharmApp: App {
     @StateObject private var model = AppModel()
 
     var body: some Scene {
-        MenuBarExtra("OpenCharm", systemImage: "record.circle") {
-            Text("OpenCharm 0.1 — recorder UI lands in Task 14")
-                .padding()
+        MenuBarExtra {
+            RecorderPanelView(model: model)
+        } label: {
+            Image(systemName: model.engine.state == .idle
+                  ? "record.circle" : "record.circle.fill")
         }
         .menuBarExtraStyle(.window)
     }
