@@ -121,16 +121,20 @@ public final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
 
     /// Converts a non-interleaved linear-PCM `CMSampleBuffer` (ScreenCaptureKit's system-audio
     /// delivery format) into an interleaved one with the same sample rate, channel count, bit
-    /// depth, and presentation time. Non-PCM or already-interleaved buffers pass through
-    /// unchanged. Returns `nil` only on an unexpected CoreMedia/CoreAudio failure.
-    private static func interleaved(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
+    /// depth, and presentation time. Non-PCM, already-interleaved, or non-Float32 buffers pass
+    /// through unchanged — the reinterleave path below reads raw memory as `Float`, so anything
+    /// that isn't confirmed 32-bit float PCM must fall through here rather than risk an
+    /// out-of-bounds read. Returns `nil` only on an unexpected CoreMedia/CoreAudio failure.
+    static func interleaved(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
         guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
               let asbdPointer = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
             return nil
         }
         let sourceASBD = asbdPointer.pointee
         guard sourceASBD.mFormatID == kAudioFormatLinearPCM,
-              sourceASBD.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0 else {
+              sourceASBD.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0,
+              sourceASBD.mFormatFlags & kAudioFormatFlagIsFloat != 0,
+              sourceASBD.mBitsPerChannel == 32 else {
             return sampleBuffer
         }
 

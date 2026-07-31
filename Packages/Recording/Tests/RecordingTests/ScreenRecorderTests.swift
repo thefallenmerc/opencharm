@@ -32,4 +32,26 @@ final class ScreenRecorderTests: XCTestCase {
         // System audio file exists (SCK emits audio even for silence).
         XCTAssertTrue(FileManager.default.fileExists(atPath: audioURL.path))
     }
+
+    /// `interleaved(_:)` reinterprets planar channel memory as `Float32` — it must only do that
+    /// for buffers actually confirmed to be 32-bit float PCM. A non-interleaved 16-bit integer
+    /// buffer (a shape ScreenCaptureKit never sends today, but the guard must reject regardless
+    /// of source) must fall through to the pass-through branch untouched, not get misread.
+    func testInterleavedPassesThroughNonFloatPCM() {
+        let start = CMClockGetTime(CMClockGetHostTimeClock())
+        let source = SampleBufferFactory.nonInterleavedInt16Buffer(pts: start)
+
+        let result = ScreenRecorder.interleaved(source)
+
+        XCTAssertTrue(result === source, "non-Float32 PCM must pass through as the same buffer, not a rebuilt one")
+        guard let result else { return }
+        guard let format = CMSampleBufferGetFormatDescription(result),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee else {
+            XCTFail("expected a valid audio format description")
+            return
+        }
+        XCTAssertEqual(asbd.mBitsPerChannel, 16)
+        XCTAssertNotEqual(asbd.mFormatFlags & kAudioFormatFlagIsFloat, kAudioFormatFlagIsFloat)
+        XCTAssertNotEqual(asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved, 0)
+    }
 }
