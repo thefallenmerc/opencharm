@@ -1,3 +1,4 @@
+import AVFoundation
 import Combine
 import ProjectStore
 import Recording
@@ -15,6 +16,7 @@ final class AppModel: ObservableObject {
     @Published var finishedProject: ProjectPackage?
 
     private var cancellables: Set<AnyCancellable> = []
+    private var selfView: SelfViewWindow?
 
     init() {
         // `engine` is a nested ObservableObject: its own @Published changes only emit on
@@ -55,10 +57,54 @@ final class AppModel: ObservableObject {
     }
 
     func stopRecording() async {
+        selfView?.close(); selfView = nil
         do { finishedProject = try await engine.stop() }
         catch { lastError = "Could not finish recording: \(error.localizedDescription)" }
     }
 
-    func beginAreaSelection() {} // Task 15
-    func beginCountdownAndRecord() { Task { await startRecording() } } // Task 15 adds countdown
+    func beginAreaSelection() {
+        AreaSelectorWindow.present { [weak self] displayID, rect in
+            self?.sources.selectedDisplayID = displayID
+            self?.sources.selectedArea = rect
+        }
+    }
+
+    func beginCountdownAndRecord() {
+        CountdownWindow.present(seconds: 3) { [weak self] in
+            Task { await self?.recordWithBubble() }
+        }
+    }
+
+    private func recordWithBubble() async {
+        // The bubble must exist BEFORE start so its window number can be excluded —
+        // but the preview layer only exists after the engine builds the webcam session.
+        // Order: pre-create an empty panel? No: exclusion only needs the number at
+        // SCContentFilter build time inside engine.start(). So: create bubble first
+        // with a placeholder layer requirement → instead we start, then show bubble,
+        // accepting the bubble may appear in the first frames? NOT acceptable.
+        //
+        // Resolution used here: WebcamRecorder is constructed inside engine.start()
+        // before SCShareableContent is queried only if the bubble exists first.
+        // Simplest correct sequencing:
+        //   1. Build the bubble window empty (no preview layer yet).
+        //   2. Pass its windowNumber via overlayWindowNumbers.
+        //   3. Start engine; when webcamPreviewLayer becomes available, attach it.
+        let placeholder = AVCaptureVideoPreviewLayer()
+        let bubble = SelfViewWindow(previewLayer: placeholder)
+        if sources.cameraID != nil {
+            bubble.orderFront(nil)
+            selfView = bubble
+        }
+        overlayWindowNumbers = [bubble.windowNumber]
+        await startRecording()
+        if let layer = engine.webcamPreviewLayer, let view = bubble.contentView {
+            placeholder.removeFromSuperlayer()
+            layer.frame = view.bounds
+            layer.cornerRadius = view.bounds.width / 2
+            layer.masksToBounds = true
+            view.layer?.addSublayer(layer)
+        } else if sources.cameraID == nil {
+            bubble.close(); selfView = nil
+        }
+    }
 }

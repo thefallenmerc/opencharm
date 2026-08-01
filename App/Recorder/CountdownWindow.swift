@@ -1,0 +1,43 @@
+import AppKit
+import SwiftUI
+
+final class CountdownWindow {
+    private static var window: NSWindow?
+
+    static func present(seconds: Int = 3, completion: @escaping () -> Void) {
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 180, height: 180),
+                           styleMask: .borderless, backing: .buffered, defer: false)
+        win.level = .screenSaver
+        win.backgroundColor = .clear
+        win.isOpaque = false
+        win.ignoresMouseEvents = true
+        win.center()
+        win.contentView = NSHostingView(rootView: CountdownView(seconds: seconds) {
+            window?.close(); window = nil
+            completion()
+        })
+        win.makeKeyAndOrderFront(nil)
+        window = win
+    }
+}
+
+struct CountdownView: View {
+    let seconds: Int
+    let done: () -> Void
+    @State private var remaining: Int = 0
+
+    var body: some View {
+        Text(remaining > 0 ? "\(remaining)" : "")
+            .font(.system(size: 96, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .frame(width: 180, height: 180)
+            .background(.black.opacity(0.6), in: Circle())
+            .onAppear {
+                remaining = seconds
+                Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { t in
+                    remaining -= 1
+                    if remaining <= 0 { t.invalidate(); done() }
+                }
+            }
+    }
+}
