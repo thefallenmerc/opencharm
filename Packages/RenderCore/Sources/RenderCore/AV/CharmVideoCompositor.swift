@@ -29,10 +29,41 @@ final class CharmInstruction: NSObject, AVVideoCompositionInstructionProtocol {
     }
 }
 
+/// Holds the last real screen frame so SCK's sparse frame delivery (it only emits on change)
+/// doesn't leave gaps between real samples — but only in the forward direction. Preview
+/// scrubbing backwards into a gap must not show a frame from later in the timeline: on a
+/// backward seek, the cache invalidates and the caller falls back to a background-only render
+/// until the next real frame re-primes it.
+struct HeldFrameCache {
+    private var lastTime: CMTime?
+    private var heldImage: CIImage?
+
+    /// - Parameters:
+    ///   - source: the real source frame for this request, if SCK delivered one.
+    ///   - time: `request.compositionTime` for this request.
+    /// - Returns: the image to render, or `nil` if nothing valid is held (caller should fall
+    ///   back to a background-only render).
+    mutating func resolve(source: CIImage?, at time: CMTime) -> CIImage? {
+        if let source {
+            lastTime = time
+            heldImage = source
+            return source
+        }
+        if let lastTime, time >= lastTime {
+            return heldImage
+        }
+        // Backward seek past the last known real frame, or nothing has ever been held: invalidate.
+        lastTime = nil
+        heldImage = nil
+        return nil
+    }
+}
+
 public final class CharmVideoCompositor: NSObject, AVVideoCompositing {
     private let context = CIContext(options: [.cacheIntermediates: false])
     private let compositor = Compositor()
-    private var lastScreenFrame: CIImage? // SCK only emits frames on change; hold the last one
+    private let cacheLock = NSLock()
+    private var screenFrameCache = HeldFrameCache() // guarded by cacheLock
 
     public var sourcePixelBufferAttributes: [String: any Sendable]? =
         [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
@@ -49,16 +80,14 @@ public final class CharmVideoCompositor: NSObject, AVVideoCompositing {
         }
         let canvasSize = request.renderContext.size
 
-        var screenImage: CIImage
-        if let pb = request.sourceFrame(byTrackID: instruction.screenTrackID) {
-            screenImage = CIImage(cvPixelBuffer: pb)
-            lastScreenFrame = screenImage
-        } else if let held = lastScreenFrame {
-            screenImage = held
-        } else {
-            screenImage = CIImage(color: .black)
-                .cropped(to: CGRect(origin: .zero, size: canvasSize))
-        }
+        let sourcePixelBuffer = request.sourceFrame(byTrackID: instruction.screenTrackID)
+        let sourceImage = sourcePixelBuffer.map { CIImage(cvPixelBuffer: $0) }
+        cacheLock.lock()
+        let resolved = screenFrameCache.resolve(source: sourceImage, at: request.compositionTime)
+        cacheLock.unlock()
+        let screenImage = resolved ?? CIImage(color: .black)
+            .cropped(to: CGRect(origin: .zero, size: canvasSize))
+
         var webcamImage: CIImage?
         if let id = instruction.webcamTrackID, let pb = request.sourceFrame(byTrackID: id) {
             webcamImage = CIImage(cvPixelBuffer: pb)
