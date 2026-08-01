@@ -1,3 +1,4 @@
+import Combine
 import ProjectStore
 import Recording
 import SwiftUI
@@ -12,6 +13,25 @@ final class AppModel: ObservableObject {
     var overlayWindowNumbers: [Int] = []
     /// Set when recording finishes; Task 18's styling window observes this.
     @Published var finishedProject: ProjectPackage?
+
+    private var cancellables: Set<AnyCancellable> = []
+
+    init() {
+        // `engine` is a nested ObservableObject: its own @Published changes only emit on
+        // `engine.objectWillChange`, not `self.objectWillChange`. Views that observe only
+        // `model` (RecorderPanelView, the MenuBarExtra label) would otherwise never
+        // re-render when `engine.state` changes. Forward the signal so they do.
+        engine.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+    }
+
+    /// Called by OnboardingView after re-checking permission status, so views observing
+    /// only `model` (not the view-local @State in OnboardingView) also re-render — e.g.
+    /// RecorderPanelView switching out of the onboarding branch once everything's granted.
+    func permissionsChanged() {
+        objectWillChange.send()
+    }
 
     var missingPermissions: [PermissionKind] {
         var needed: [PermissionKind] = [.screenRecording]

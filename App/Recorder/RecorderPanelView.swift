@@ -15,6 +15,8 @@ struct RecorderPanelView: View {
         VStack(alignment: .leading, spacing: 12) {
             if case .recording = model.engine.state {
                 recordingBody
+            } else if case .stopping = model.engine.state {
+                stoppingBody
             } else if !model.missingPermissions.isEmpty {
                 OnboardingView(model: model)
             } else {
@@ -98,5 +100,19 @@ struct RecorderPanelView: View {
                 .frame(maxWidth: .infinity)
         }
         .keyboardShortcut(.defaultAction)
+    }
+
+    var stoppingBody: some View {
+        Button {
+            // no-op: already stopping, finalization is in flight
+        } label: {
+            HStack {
+                Label("Stopping…", systemImage: "stop.circle.fill")
+                Spacer()
+                ProgressView().controlSize(.small)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .disabled(true)
     }
 }

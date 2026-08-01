@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct OnboardingView: View {
@@ -14,6 +15,13 @@ struct OnboardingView: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
         .onAppear { refresh() }
+        // Granting a permission happens in System Settings, outside the app. When the
+        // user switches back, re-check so rows go green and RecorderPanelView can drop
+        // out of the onboarding branch without the user having to relaunch or reopen.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refresh()
+            model.permissionsChanged()
+        }
     }
 
     func row(_ kind: PermissionKind, _ label: String) -> some View {
@@ -29,6 +37,7 @@ struct OnboardingView: View {
                         _ = await PermissionsService.request(kind)
                         PermissionsService.openSystemSettings(kind)
                         refresh()
+                        model.permissionsChanged()
                     }
                 }
             }
