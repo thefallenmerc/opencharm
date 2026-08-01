@@ -88,7 +88,8 @@ struct RecorderPanelView: View {
             }
             .keyboardShortcut(.defaultAction)
             .disabled(sources.mode == .window && sources.selectedWindow == nil
-                      || sources.mode == .area && sources.selectedArea == nil)
+                      || sources.mode == .area && sources.selectedArea == nil
+                      || model.isCountingDown)
         }
     }
 

@@ -10,6 +10,11 @@ final class AppModel: ObservableObject {
     let sources = SourcePickerModel()
 
     @Published var lastError: String?
+    /// True from the moment a countdown is requested until `recordWithBubble()` finishes
+    /// (whether or not recording actually started). Belt-and-braces alongside
+    /// `CountdownWindow`'s own single-flight guard: keeps the Start button disabled so a
+    /// second click can't even attempt to spawn a second countdown/recording.
+    @Published var isCountingDown = false
     /// Window numbers of our overlay windows, excluded from capture (Task 15 populates).
     var overlayWindowNumbers: [Int] = []
     /// Set when recording finishes; Task 18's styling window observes this.
@@ -70,8 +75,12 @@ final class AppModel: ObservableObject {
     }
 
     func beginCountdownAndRecord() {
+        isCountingDown = true
         CountdownWindow.present(seconds: 3) { [weak self] in
-            Task { await self?.recordWithBubble() }
+            Task {
+                await self?.recordWithBubble()
+                self?.isCountingDown = false
+            }
         }
     }
 
@@ -89,6 +98,13 @@ final class AppModel: ObservableObject {
         //   1. Build the bubble window empty (no preview layer yet).
         //   2. Pass its windowNumber via overlayWindowNumbers.
         //   3. Start engine; when webcamPreviewLayer becomes available, attach it.
+
+        // Guard against a bubble orphaned by a previous failed attempt: if it were left
+        // around, the line below would silently drop it from overlayWindowNumbers (which
+        // only ever holds the NEWEST bubble's number), so it would stop being excluded and
+        // could appear in this recording.
+        selfView?.close(); selfView = nil
+
         let placeholder = AVCaptureVideoPreviewLayer()
         let bubble = SelfViewWindow(previewLayer: placeholder)
         if sources.cameraID != nil {
@@ -97,6 +113,14 @@ final class AppModel: ObservableObject {
         }
         overlayWindowNumbers = [bubble.windowNumber]
         await startRecording()
+        guard case .recording = engine.state else {
+            // startRecording() failed (or never actually started): don't leave a stray
+            // bubble on screen whose window number is no longer excluded from anything.
+            bubble.close()
+            selfView = nil
+            overlayWindowNumbers = []
+            return
+        }
         if let layer = engine.webcamPreviewLayer, let view = bubble.contentView {
             placeholder.removeFromSuperlayer()
             layer.frame = view.bounds

@@ -5,6 +5,10 @@ final class CountdownWindow {
     private static var window: NSWindow?
 
     static func present(seconds: Int = 3, completion: @escaping () -> Void) {
+        // A second Start click within the countdown window must not spawn a second timer:
+        // that would overwrite `window` and let the first timer's completion close the
+        // WRONG window (leaving the real one orphaned) while also double-firing recording.
+        guard window == nil else { return }
         let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 180, height: 180),
                            styleMask: .borderless, backing: .buffered, defer: false)
         win.level = .screenSaver
@@ -12,8 +16,11 @@ final class CountdownWindow {
         win.isOpaque = false
         win.ignoresMouseEvents = true
         win.center()
-        win.contentView = NSHostingView(rootView: CountdownView(seconds: seconds) {
-            window?.close(); window = nil
+        win.contentView = NSHostingView(rootView: CountdownView(seconds: seconds) { [weak win] in
+            // Only clear the static if it still points at the window THIS completion made —
+            // a stale completion (if one ever fired late) must never close a newer window.
+            if let win, window === win { window = nil }
+            win?.close()
             completion()
         })
         win.makeKeyAndOrderFront(nil)
