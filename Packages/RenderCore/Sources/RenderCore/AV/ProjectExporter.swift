@@ -53,6 +53,10 @@ public final class ProjectExporter {
 
     public func export(_ request: ExportRequest,
                        progress: @escaping @Sendable (Double) -> Void) async throws {
+        // Pre-flight: an already-cancelled exporter shouldn't pay for the (comparatively
+        // expensive) composition build at all.
+        if wasCancelled { throw ExportError.cancelled }
+
         let canvasSize = Self.pixelSize(for: request.resolution, sourceCanvas: sourceCanvasSize)
         let built = try await ProjectCompositionBuilder.build(
             timeline: timeline, settings: settings, canvasSize: canvasSize,
@@ -99,26 +103,58 @@ public final class ProjectExporter {
             audioIn = input
         }
 
+        if wasCancelled {
+            try? FileManager.default.removeItem(at: request.outputURL)
+            throw ExportError.cancelled
+        }
+
         guard reader.startReading(), writer.startWriting() else {
+            try? FileManager.default.removeItem(at: request.outputURL)
             throw ExportError.failed(underlying: reader.error ?? writer.error)
         }
         writer.startSession(atSourceTime: .zero)
 
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask { [weak self] in
-                try await Self.pump(input: videoIn, output: videoOut, label: "video") { pts in
-                    progress(min(0.99, pts / max(duration, 0.01)))
-                    return self?.wasCancelled ?? true
-                }
-            }
-            if let audioIn, let audioOut {
+        do {
+            try await withThrowingTaskGroup(of: Void.self) { group in
                 group.addTask { [weak self] in
-                    try await Self.pump(input: audioIn, output: audioOut, label: "audio") { _ in
-                        self?.wasCancelled ?? true
+                    try await Self.pump(input: videoIn, output: videoOut, writer: writer, label: "video") { pts in
+                        progress(min(0.99, pts / max(duration, 0.01)))
+                        return self?.wasCancelled ?? true
                     }
                 }
+                if let audioIn, let audioOut {
+                    group.addTask { [weak self] in
+                        try await Self.pump(input: audioIn, output: audioOut, writer: writer, label: "audio") { _ in
+                            self?.wasCancelled ?? true
+                        }
+                    }
+                }
+                // Drain with `next()` rather than `waitForAll()`: a plain `ThrowingTaskGroup`
+                // does NOT cancel its remaining children just because one throws — verified
+                // empirically (a sibling stuck on an unresumed continuation blocks
+                // `waitForAll()` forever even after another child throws). So on the first
+                // error we explicitly `cancelAll()`, which flips `Task.isCancelled` for the
+                // still-running sibling; `pump`'s `withTaskCancellationHandler` observes that
+                // and force-resumes its own continuation, letting this loop finish draining
+                // every child (satisfying structured concurrency) instead of hanging.
+                var firstError: Error?
+                while true {
+                    do {
+                        guard try await group.next() != nil else { break }
+                    } catch {
+                        if firstError == nil {
+                            firstError = error
+                            group.cancelAll()
+                        }
+                    }
+                }
+                if let firstError { throw firstError }
             }
-            try await group.waitForAll()
+        } catch {
+            reader.cancelReading()
+            writer.cancelWriting()
+            try? FileManager.default.removeItem(at: request.outputURL)
+            throw error
         }
 
         if wasCancelled {
@@ -134,32 +170,86 @@ public final class ProjectExporter {
         progress(1.0)
     }
 
+    /// Bridges `pump`'s completion-callback loop into a single-resume `async throws`.
+    /// Two independent triggers can resume it — the `requestMediaDataWhenReady` callback
+    /// (on the pump's own serial queue) and a task-cancellation handler (on an arbitrary
+    /// thread, once a sibling pump fails and `export()` cancels the group) — so both the
+    /// "mark the input finished" step and the "resume the continuation" step are guarded
+    /// by one lock to stay safe under either interleaving, including cancellation arriving
+    /// before the continuation has even been registered.
+    private final class PumpContinuation: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Void, Error>?
+        private var pendingResult: Result<Void, Error>?
+        private var finishedInput = false
+
+        func register(_ continuation: CheckedContinuation<Void, Error>) {
+            lock.lock()
+            if let pendingResult {
+                lock.unlock()
+                Self.settle(continuation, pendingResult)
+                return
+            }
+            self.continuation = continuation
+            lock.unlock()
+        }
+
+        func finish(_ input: AVAssetWriterInput, _ result: Result<Void, Error>) {
+            lock.lock()
+            guard pendingResult == nil else { lock.unlock(); return }
+            pendingResult = result
+            let alreadyFinishedInput = finishedInput
+            finishedInput = true
+            let continuation = self.continuation
+            self.continuation = nil
+            lock.unlock()
+            if !alreadyFinishedInput { input.markAsFinished() }
+            if let continuation { Self.settle(continuation, result) }
+        }
+
+        private static func settle(_ continuation: CheckedContinuation<Void, Error>,
+                                   _ result: Result<Void, Error>) {
+            switch result {
+            case .success: continuation.resume()
+            case .failure(let error): continuation.resume(throwing: error)
+            }
+        }
+    }
+
     /// Pulls samples from `output` into `input`; `tick(ptsSeconds)` returns true to cancel.
-    private static func pump(input: AVAssetWriterInput, output: AVAssetReaderOutput,
-                             label: String,
-                             tick: @escaping @Sendable (Double) -> Bool) async throws {
+    /// Throws `ExportError.failed` if the writer rejects a sample (e.g. it has failed or
+    /// been cancelled), rather than silently discarding `append`'s Bool result — an
+    /// unchecked failed `append` would otherwise leave `isReadyForMoreMediaData` false
+    /// forever with no further readiness callback, hanging `export()` unrecoverably.
+    static func pump(input: AVAssetWriterInput, output: AVAssetReaderOutput,
+                     writer: AVAssetWriter, label: String,
+                     tick: @escaping @Sendable (Double) -> Bool) async throws {
         let queue = DispatchQueue(label: "export.pump.\(label)")
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            var resumed = false
-            input.requestMediaDataWhenReady(on: queue) {
-                // `requestMediaDataWhenReady`'s block can in principle re-fire before
-                // `markAsFinished` has taken effect; guard so the continuation only ever
-                // resumes once (a double-resume is a fatal error).
-                if resumed { return }
-                while input.isReadyForMoreMediaData {
-                    guard let sb = output.copyNextSampleBuffer() else {
-                        input.markAsFinished()
-                        if !resumed { resumed = true; cont.resume() }
-                        return
+        let box = PumpContinuation()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                box.register(cont)
+                input.requestMediaDataWhenReady(on: queue) {
+                    while input.isReadyForMoreMediaData {
+                        guard let sb = output.copyNextSampleBuffer() else {
+                            box.finish(input, .success(()))
+                            return
+                        }
+                        if tick(CMSampleBufferGetPresentationTimeStamp(sb).seconds) {
+                            box.finish(input, .success(()))
+                            return
+                        }
+                        if !input.append(sb) {
+                            box.finish(input, .failure(ExportError.failed(underlying: writer.error)))
+                            return
+                        }
                     }
-                    if tick(CMSampleBufferGetPresentationTimeStamp(sb).seconds) {
-                        input.markAsFinished()
-                        if !resumed { resumed = true; cont.resume() }
-                        return
-                    }
-                    input.append(sb)
                 }
             }
+        } onCancel: {
+            // The real failure (if any) is already carried by whichever sibling pump threw
+            // first; this pump just needs to stop cleanly so the group can finish draining.
+            box.finish(input, .success(()))
         }
     }
 }
