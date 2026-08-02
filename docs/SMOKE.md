@@ -26,10 +26,15 @@ Capture cannot run on CI — walk this list on real hardware.
    ⌘O, and dock right-click) opens a chosen .opencharm; bad selection shows an
    error alert.
 7. Noise removal toggle: audible hiss reduction; second toggle instant (cache).
-8. Export Source/1080p/4K in both codecs; files play in QuickTime; the webcam
+8. Auto Zoom: record a full-screen (or Area) clip clicking around a few spots. In
+   Studio → Auto Zoom → enable: the preview smoothly zooms toward each click region,
+   holds, and eases out; Zoom level / Speed sliders take effect; toggling off returns
+   to a static frame. (Window recordings show "no click data" — expected.) Export and
+   confirm the zoom is baked into the file.
+9. Export Source/1080p/4K in both codecs; files play in QuickTime; the webcam
    overlay fills its circle (no squeeze/stretch); Reveal in Finder works.
-9. Kill the app (Force Quit) 5 s into a recording. Relaunch: recovery prompt at
-   launch; recovered project opens in the Studio and plays up to ~2 s before the
-   kill.
-10. Unplug an external webcam mid-recording: recording continues; stop succeeds;
+10. Kill the app (Force Quit) 5 s into a recording. Relaunch: recovery prompt at
+    launch; recovered project opens in the Studio and plays up to ~2 s before the
+    kill.
+11. Unplug an external webcam mid-recording: recording continues; stop succeeds;
     idle preview resumes on the remaining camera (or hides bubble if none).
