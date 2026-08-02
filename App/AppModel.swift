@@ -7,6 +7,14 @@ import SwiftUI
 
 @MainActor
 final class AppModel: ObservableObject {
+    /// Self-registering hook so `AppDelegate.applicationDidFinishLaunching` — which runs before
+    /// SwiftUI has necessarily evaluated any lazy Scene content (in particular
+    /// `MenuBarExtra(.window)`'s `RecorderPanelView`, which only builds its `body` once the user
+    /// actually clicks the menu bar icon) — can reach the app's one `AppModel` instance without
+    /// SwiftUI plumbing. Set once, in `init()`, well before AppKit dispatches the launch
+    /// notification. See `OpenCharmApp.swift`.
+    static weak var shared: AppModel?
+
     let engine = RecordingEngine()
     let sources = SourcePickerModel()
 
@@ -21,7 +29,13 @@ final class AppModel: ObservableObject {
     /// Set when recording finishes; Task 18's styling window observes this.
     @Published var finishedProject: ProjectPackage?
     /// Set by the menu-bar view via `@Environment(\.openWindow)`; opens the Studio window.
-    var openStylingWindow: (() -> Void)?
+    var openStylingWindow: (() -> Void)? {
+        didSet { openPendingStylingWindowIfNeeded() }
+    }
+    /// Set when something wants the Studio window opened but `openStylingWindow` isn't installed
+    /// yet — namely recovery-on-launch firing from `AppDelegate`, ahead of `RecorderPanelView`
+    /// ever appearing. Serviced automatically the moment `openStylingWindow` is assigned.
+    private var pendingStylingOpen = false
 
     private var cancellables: Set<AnyCancellable> = []
     private var selfView: SelfViewWindow?
@@ -29,6 +43,7 @@ final class AppModel: ObservableObject {
     private var didCheckRecovery = false
 
     init() {
+        Self.shared = self
         // `engine` is a nested ObservableObject: its own @Published changes only emit on
         // `engine.objectWillChange`, not `self.objectWillChange`. Views that observe only
         // `model` (RecorderPanelView, the MenuBarExtra label) would otherwise never
@@ -101,19 +116,45 @@ final class AppModel: ObservableObject {
         panel.canChooseFiles = true
         panel.allowedContentTypes = []          // .opencharm is a directory package
         panel.directoryURL = ProjectLibrary.defaultDirectory
-        if panel.runModal() == .OK, let url = panel.url,
-           url.pathExtension == "opencharm",
-           let pkg = try? ProjectPackage.open(at: url) {
+        // .OK with no URL shouldn't happen, but if it did, treat it like Cancel rather than
+        // reporting a spurious error.
+        guard panel.runModal() == .OK, let url = panel.url else { return } // user cancelled
+        guard url.pathExtension == "opencharm" else {
+            presentOpenProjectError("Not an OpenCharm project.")
+            return
+        }
+        do {
+            let pkg = try ProjectPackage.open(at: url)
             finishedProject = pkg
             NSApp.activate(ignoringOtherApps: true)
             openStylingWindow?()
+        } catch {
+            presentOpenProjectError("Couldn't open project: \(error.localizedDescription)")
         }
     }
 
+    /// A picked file/folder that isn't a valid `.opencharm` package used to fail silently —
+    /// indistinguishable from the user cancelling the panel. Surface it both ways: `lastError`
+    /// for the recorder panel's inline banner, and an immediate `NSAlert` since the user is
+    /// already mid-interaction with a modal panel and expects a direct response.
+    private func presentOpenProjectError(_ message: String) {
+        lastError = message
+        let alert = NSAlert()
+        alert.messageText = "OpenCharm"
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
     func checkRecoveryOnLaunch() {
-        if let pkg = RecoveryPrompt.checkOnLaunch() {
-            finishedProject = pkg
-            openStylingWindow?()
+        guard let pkg = RecoveryPrompt.checkOnLaunch() else { return }
+        finishedProject = pkg
+        if let openStylingWindow {
+            openStylingWindow()
+        } else {
+            // `RecorderPanelView` hasn't appeared yet (this fired from `AppDelegate` at launch,
+            // before the user ever clicked the menu bar icon) — defer until it does.
+            pendingStylingOpen = true
         }
     }
 
@@ -121,6 +162,15 @@ final class AppModel: ObservableObject {
         guard !didCheckRecovery else { return }
         didCheckRecovery = true
         checkRecoveryOnLaunch()
+    }
+
+    /// Services a styling-window-open request that arrived before `openStylingWindow` existed —
+    /// see `checkRecoveryOnLaunch()`. Called automatically from `openStylingWindow`'s `didSet`,
+    /// so `RecorderPanelView.onAppear` needs no extra wiring beyond the existing assignment.
+    private func openPendingStylingWindowIfNeeded() {
+        guard pendingStylingOpen else { return }
+        pendingStylingOpen = false
+        openStylingWindow?()
     }
 
     func beginAreaSelection() {

@@ -9,7 +9,7 @@ enum RecoveryPrompt {
         let alert = NSAlert()
         alert.messageText = "Recover interrupted recording?"
         alert.informativeText =
-            "\(url.deletingPathExtension().lastPathComponent) was interrupted (app quit while recording). The captured video up to the last moment can be recovered."
+            "\(url.deletingPathExtension().lastPathComponent) was interrupted (app quit while recording). The captured video up to the last moment can be recovered. The recovered project will open in the Studio window — click the OpenCharm menu bar icon if it doesn't appear."
         alert.addButton(withTitle: "Recover")
         alert.addButton(withTitle: "Delete It")
         switch alert.runModal() {
