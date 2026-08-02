@@ -35,6 +35,7 @@ final class DockPanel: NSPanel, NSWindowDelegate {
             setFrameOrigin(NSPoint(x: f.midX - frame.width / 2,
                                    y: f.minY + f.height * 0.18))
         }
+        clampToScreen()
     }
 
     // Popovers and buttons inside need key status; nonactivating panels may refuse it
@@ -43,5 +44,27 @@ final class DockPanel: NSPanel, NSWindowDelegate {
 
     func windowDidMove(_ notification: Notification) {
         UserDefaults.standard.set(NSStringFromPoint(frame.origin), forKey: Self.originKey)
+    }
+
+    // The content resizes after SwiftUI lays out its fitting size, and when the dock morphs into
+    // the compact stop bar and back. Re-clamp so a grow near an edge can't push it off-screen.
+    func windowDidResize(_ notification: Notification) {
+        clampToScreen()
+    }
+
+    /// Keeps the whole panel inside the active screen's `visibleFrame` — which already excludes the
+    /// menu bar and the macOS Dock — so it never launches off-screen or hidden behind the Dock.
+    /// Also self-heals a stale saved origin (moved window, a display that's since been disconnected).
+    private func clampToScreen() {
+        let center = CGPoint(x: frame.midX, y: frame.midY)
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(center) })
+            ?? NSScreen.main else { return }
+        let v = screen.visibleFrame.insetBy(dx: 8, dy: 8) // small margin off the edges/Dock
+        var o = frame.origin
+        o.x = min(max(o.x, v.minX), v.maxX - frame.width)
+        o.y = min(max(o.y, v.minY), v.maxY - frame.height)
+        if frame.width > v.width { o.x = v.minX }   // panel wider than the usable area
+        if frame.height > v.height { o.y = v.minY }
+        if o != frame.origin { setFrameOrigin(o) }
     }
 }
