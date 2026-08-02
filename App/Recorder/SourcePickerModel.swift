@@ -19,6 +19,10 @@ final class SourcePickerModel: ObservableObject {
     @Published var micID: String?
     @Published var systemAudio = true
     @Published var fps = 60
+    /// Master switches for the dock toggles. Device *selection* (`cameraID`/`micID`)
+    /// is preserved while a source is toggled off.
+    @Published var cameraEnabled = true
+    @Published var micEnabled = true
 
     func refresh() async {
         cameras = AVCaptureDevice.DiscoverySession(
@@ -51,7 +55,9 @@ final class SourcePickerModel: ObservableObject {
             source = .area(displayID: selectedDisplayID, rect: selectedArea)
         }
         return RecordingConfiguration(
-            source: source, webcamDeviceID: cameraID, micDeviceID: micID,
+            source: source,
+            webcamDeviceID: cameraEnabled ? cameraID : nil,
+            micDeviceID: micEnabled ? micID : nil,
             capturesSystemAudio: systemAudio, fps: fps,
             excludedWindowNumbers: excludedWindowNumbers)
     }

@@ -17,6 +17,8 @@ final class AppModel: ObservableObject {
 
     let engine = RecordingEngine()
     let sources = SourcePickerModel()
+    /// Owns the live idle camera preview and the one self-view bubble (idle + recording).
+    let cameraPreview = CameraPreviewController()
 
     @Published var lastError: String?
     /// True from the moment a countdown is requested until `recordWithBubble()` finishes
@@ -32,7 +34,6 @@ final class AppModel: ObservableObject {
     private lazy var studio = StudioWindowController()
 
     private var cancellables: Set<AnyCancellable> = []
-    private var selfView: SelfViewWindow?
     private var diskWatchdog: Timer?
     private var didCheckRecovery = false
 
@@ -62,9 +63,41 @@ final class AppModel: ObservableObject {
 
     var missingPermissions: [PermissionKind] {
         var needed: [PermissionKind] = [.screenRecording]
-        if sources.cameraID != nil { needed.append(.camera) }
-        if sources.micID != nil { needed.append(.microphone) }
+        if sources.cameraEnabled, sources.cameraID != nil { needed.append(.camera) }
+        if sources.micEnabled, sources.micID != nil { needed.append(.microphone) }
         return needed.filter { PermissionsService.status($0) != .granted }
+    }
+
+    /// Launch-time UI: called from AppDelegate after the recovery check. Requests
+    /// camera permission on first launch, then starts the live self-view.
+    func launchUI() {
+        Task {
+            await sources.refresh()
+            if PermissionsService.status(.camera) == .undetermined {
+                _ = await PermissionsService.request(.camera)
+            }
+            refreshIdlePreview()
+        }
+    }
+
+    /// (Re)starts or stops the idle preview to match the camera toggle + permission.
+    func refreshIdlePreview() {
+        guard case .idle = engine.state else { return } // recording owns the camera
+        if sources.cameraEnabled, PermissionsService.status(.camera) == .granted {
+            cameraPreview.startIdlePreview(deviceID: sources.cameraID)
+        } else {
+            cameraPreview.stopIdleSession()
+            cameraPreview.hideBubble()
+        }
+    }
+
+    func setCameraEnabled(_ on: Bool) {
+        sources.cameraEnabled = on
+        refreshIdlePreview()
+    }
+
+    func setMicEnabled(_ on: Bool) {
+        sources.micEnabled = on
     }
 
     func startRecording() async {
@@ -100,13 +133,13 @@ final class AppModel: ObservableObject {
     }
 
     func stopRecording() async {
-        selfView?.close(); selfView = nil
         diskWatchdog?.invalidate(); diskWatchdog = nil
         do {
             let pkg = try await engine.stop()
             openStudio(pkg)
         }
         catch { lastError = "Could not finish recording: \(error.localizedDescription)" }
+        refreshIdlePreview() // resume the live idle preview whether stop succeeded or failed
     }
 
     func openProjectPanel() {
@@ -172,45 +205,26 @@ final class AppModel: ObservableObject {
     }
 
     private func recordWithBubble() async {
-        // Sequencing: the bubble window must exist, with its window number already in
-        // `overlayWindowNumbers`, before `startRecording()` calls `engine.start()` — window
-        // exclusion is fixed at SCContentFilter build time, so a window created afterward
-        // could not be retroactively excluded. Its `AVCaptureVideoPreviewLayer` isn't
-        // available that early, though: it only exists once the engine has built the webcam
-        // capture session. So the bubble is created first with a throwaway placeholder layer
-        // (an empty `NSWindow` still gets a window number without one), and the real preview
-        // layer is swapped in afterward, once `engine.webcamPreviewLayer` exists.
-
-        // Guard against a bubble orphaned by a previous failed attempt: if it were left
-        // around, the line below would silently drop it from overlayWindowNumbers (which
-        // only ever holds the NEWEST bubble's number), so it would stop being excluded and
-        // could appear in this recording.
-        selfView?.close(); selfView = nil
-
-        let placeholder = AVCaptureVideoPreviewLayer()
-        let bubble = SelfViewWindow(previewLayer: placeholder)
-        if sources.cameraID != nil {
-            bubble.orderFront(nil)
-            selfView = bubble
+        // The bubble (owned by cameraPreview) must exist with its window number in
+        // overlayWindowNumbers before engine.start builds the capture filter; the
+        // engine's own preview layer is swapped in after start. The idle session must
+        // stop first so the recording session can open the camera device.
+        let cameraActive = sources.cameraEnabled && sources.cameraID != nil
+        cameraPreview.stopIdleSession()
+        if cameraActive {
+            cameraPreview.ensureBubble()
+        } else {
+            cameraPreview.hideBubble()
         }
-        overlayWindowNumbers = [bubble.windowNumber]
+        overlayWindowNumbers = [cameraPreview.bubbleWindowNumber].compactMap { $0 }
         await startRecording()
         guard case .recording = engine.state else {
-            // startRecording() failed (or never actually started): don't leave a stray
-            // bubble on screen whose window number is no longer excluded from anything.
-            bubble.close()
-            selfView = nil
             overlayWindowNumbers = []
+            refreshIdlePreview() // resume live preview after a failed start
             return
         }
-        if let layer = engine.webcamPreviewLayer, let view = bubble.contentView {
-            placeholder.removeFromSuperlayer()
-            layer.frame = view.bounds
-            layer.cornerRadius = view.bounds.width / 2
-            layer.masksToBounds = true
-            view.layer?.addSublayer(layer)
-        } else if sources.cameraID == nil {
-            bubble.close(); selfView = nil
+        if cameraActive, let layer = engine.webcamPreviewLayer {
+            cameraPreview.attachRecordingLayer(layer)
         }
     }
 }

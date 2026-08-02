@@ -13,6 +13,11 @@ final class SelfViewWindow: NSPanel {
                    styleMask: [.borderless, .nonactivatingPanel],
                    backing: .buffered, defer: false)
         level = .floating
+        // Without this the bubble is pinned to the Space it was created on and stays hidden
+        // over fullscreen apps: switching Spaces (four-finger swipe) or entering a fullscreen
+        // app would leave the webcam behind. `.canJoinAllSpaces` makes it follow the user to
+        // every Space; `.fullScreenAuxiliary` lets it float above fullscreen windows.
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         backgroundColor = .clear
         isOpaque = false
         isMovableByWindowBackground = true
@@ -27,5 +32,17 @@ final class SelfViewWindow: NSPanel {
         view.layer = CALayer()
         view.layer!.addSublayer(previewLayer)
         contentView = view
+    }
+
+    /// Replaces the bubble's current preview layer with `layer` (used for the
+    /// idle-session ↔ recording-session handoff).
+    func swap(to layer: AVCaptureVideoPreviewLayer) {
+        guard let view = contentView else { return }
+        view.layer?.sublayers?.forEach { $0.removeFromSuperlayer() }
+        layer.frame = view.bounds
+        layer.cornerRadius = view.bounds.width / 2
+        layer.masksToBounds = true
+        layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        view.layer?.addSublayer(layer)
     }
 }
