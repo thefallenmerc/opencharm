@@ -44,7 +44,8 @@ struct InspectorView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(minWidth: 280)
+        .frame(width: 300)
+        .frame(maxHeight: .infinity)
     }
 
     func slider(_ label: String, _ value: Binding<Double>, _ range: ClosedRange<Double>) -> some View {

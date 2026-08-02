@@ -10,6 +10,7 @@ struct DockView: View {
     @State private var showWindowPicker = false
     @State private var showDisplayPicker = false
     @State private var showPermissions = false
+    @State private var hoveringStop = false
 
     init(model: AppModel) {
         self.model = model
@@ -27,10 +28,6 @@ struct DockView: View {
                 idleDock
             }
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 14)
-        .background(RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(Color.black.opacity(0.82)))
         .fixedSize()
         .contextMenu {
             Picker("Frame rate", selection: $sources.fps) {
@@ -44,24 +41,38 @@ struct DockView: View {
     }
 
     private func recordingBar(since start: Date) -> some View {
-        HStack(spacing: 14) {
-            Circle().fill(Color.red).frame(width: 10, height: 10)
+        // The red dot is the Stop button (a Button consumes the mouse-down, so clicking it never
+        // drags the panel); the timer is inert, so grabbing it drags the pill via the panel's
+        // isMovableByWindowBackground. On hover the dot shows a stop square so it reads as clickable.
+        HStack(spacing: 12) {
+            Button {
+                Task { await model.stopRecording() }
+            } label: {
+                ZStack {
+                    Circle().fill(Color.red).frame(width: 11, height: 11)
+                    if hoveringStop {
+                        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                            .fill(Color.white).frame(width: 5, height: 5)
+                    }
+                }
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Stop recording")
+            .onHover { hoveringStop = $0 }
+
+            Rectangle().fill(Color.white.opacity(0.25)).frame(width: 1, height: 18)
+
             TimelineView(.periodic(from: start, by: 1)) { context in
                 let s = max(0, Int(context.date.timeIntervalSince(start)))
                 Text(String(format: "%02d:%02d", s / 60, s % 60))
                     .font(.system(size: 15, weight: .semibold).monospacedDigit())
                     .foregroundStyle(.white)
             }
-            Button {
-                Task { await model.stopRecording() }
-            } label: {
-                Label("Stop", systemImage: "stop.circle.fill")
-                    .foregroundStyle(.white)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.red)
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .background(pillBackground)
     }
 
     private var stoppingBar: some View {
@@ -69,6 +80,15 @@ struct DockView: View {
             ProgressView().controlSize(.small)
             Text("Finishing…").foregroundStyle(.white)
         }
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .background(pillBackground)
+    }
+
+    private var pillBackground: some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(Color.black.opacity(0.9))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.15), lineWidth: 1))
     }
 
     var idleDock: some View {
@@ -98,7 +118,7 @@ struct DockView: View {
                     model.startAreaRecording()
                 }
                 divider
-                toggleButton(on: "video", off: "video.slash", label: "Camera",
+                toggleButton(on: "video", off: "video.slash", label: cameraLabel,
                              isOn: sources.cameraEnabled) {
                     model.setCameraEnabled(!sources.cameraEnabled)
                 }
@@ -114,7 +134,7 @@ struct DockView: View {
                         }
                     }
                 }
-                toggleButton(on: "mic", off: "mic.slash", label: "Mic",
+                toggleButton(on: "mic", off: "mic.slash", label: micLabel,
                              isOn: sources.micEnabled) {
                     model.setMicEnabled(!sources.micEnabled)
                 }
@@ -133,6 +153,8 @@ struct DockView: View {
                              label: "System Audio", isOn: sources.systemAudio) {
                     sources.systemAudio.toggle()
                 }
+                divider
+                settingsMenu
             }
             .disabled(model.isCountingDown)
             if let err = model.lastError {
@@ -148,6 +170,45 @@ struct DockView: View {
         .popover(isPresented: $showPermissions) {
             OnboardingView(model: model).padding(16).frame(width: 320)
         }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 14)
+        .background(RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(Color.black.opacity(0.82)))
+    }
+
+    /// The selected camera/mic device names shown under the dock toggles (falls back to the
+    /// generic label when nothing is selected). Long names ellipsize inside the toggle's frame.
+    private var cameraLabel: String {
+        sources.cameras.first { $0.uniqueID == sources.cameraID }?.localizedName ?? "Camera"
+    }
+
+    private var micLabel: String {
+        sources.mics.first { $0.uniqueID == sources.micID }?.localizedName ?? "Mic"
+    }
+
+    /// Gear item at the end of the dock: frame rate, Open Project, Quit (mirrors the dock's
+    /// background right-click menu as a visible control).
+    private var settingsMenu: some View {
+        Menu {
+            Picker("Frame rate", selection: $sources.fps) {
+                Text("60 fps").tag(60)
+                Text("30 fps").tag(30)
+            }
+            Divider()
+            Button("Open Project…") { model.openProjectPanel() }
+            Button("Quit OpenCharm") { NSApp.terminate(nil) }
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: "gearshape").font(.system(size: 22))
+                Text("Settings").font(.system(size: 13))
+            }
+            .foregroundStyle(.white)
+            .frame(width: 86, height: 58)
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
     }
 
     /// Sources need permissions; opens the onboarding popover when any are missing.
@@ -194,6 +255,7 @@ struct DockView: View {
             VStack(spacing: 6) {
                 Image(systemName: isOn ? on : off).font(.system(size: 22))
                 Text(label).font(.system(size: 13))
+                    .lineLimit(1).truncationMode(.tail)
             }
             .foregroundStyle(isOn ? .white : .white.opacity(0.45))
             .frame(width: 86, height: 58)

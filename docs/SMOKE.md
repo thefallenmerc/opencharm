@@ -5,14 +5,18 @@ Capture cannot run on CI — walk this list on real hardware.
 1. Fresh permissions: revoke all three in System Settings, launch. Dock appears;
    clicking any source opens the permission popover; deep links land on the right
    pane; after granting, sources start normally.
-2. Launch: dock + live webcam bubble appear with no clicks. Camera toggle off →
-   bubble hides AND camera light turns off; on → live again. Right-click Camera/Mic
-   to switch devices.
+2. Launch: dock + live webcam bubble appear with no clicks. Camera/Mic tiles show
+   the selected device name (ellipsized). Camera toggle off → bubble hides AND camera
+   light turns off; on → live again. Right-click Camera/Mic to switch devices. The
+   Settings gear opens frame rate / Open Project / Quit.
 3. Display + camera + mic + system audio, 60 fps, 10 s with music and speech:
-   click Display → countdown → dock morphs to timer + Stop; tracks exist, styled
-   preview opens on stop, mic/system audible, no drift.
-4. Window mode on a Safari window; Area mode on a ~800×600 region (drag →
-   countdown starts immediately): exported dimensions match (even-rounded).
+   click Display → countdown → dock morphs to a compact pill (red dot + MM:SS timer);
+   clicking the red dot stops, dragging the timer moves the pill; tracks exist, styled
+   preview opens on stop (properties in a fixed left sidebar, preview fills the rest),
+   mic/system audible, no drift.
+4. Window mode on a Safari window; Area mode on a ~800×600 region — the overlay dims
+   bluish with the selection area clear and L-brackets at its corners; drag → countdown
+   starts immediately: exported dimensions match (even-rounded).
 5. Neither the dock, the stop bar, nor the bubble appear anywhere in any
    recording; bubble draggable while recording; dock draggable always, and its
    position persists across relaunch. On a fullscreen app, four-finger-swipe to

@@ -18,7 +18,8 @@ final class StudioWindowController: NSWindowController {
             backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.title = "OpenCharm Studio"
-        window.minSize = NSSize(width: 480, height: 320)
+        // Fixed 300pt inspector sidebar + a 1pt divider + the 480pt preview minimum.
+        window.minSize = NSSize(width: 820, height: 420)
         window.center()
         super.init(window: window)
     }

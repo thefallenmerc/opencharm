@@ -47,11 +47,20 @@ struct AreaSelectionView: View {
 
     var body: some View {
         GeometryReader { geo in
+            let full = CGRect(origin: .zero, size: geo.size)
             ZStack {
-                Color.black.opacity(0.25)
+                // Bluish dim over everything except the selection — the even-odd rule cuts a
+                // clear hole where the chosen area is, so it reads brighter than the surround.
+                Path { p in
+                    p.addRect(full)
+                    if let r = rect { p.addRect(r) }
+                }
+                .fill(Color(.sRGB, red: 0.10, green: 0.14, blue: 0.30, opacity: 0.32),
+                      style: FillStyle(eoFill: true))
                 if let r = rect {
                     Path { $0.addRect(r) }
-                        .stroke(Color.accentColor, lineWidth: 2)
+                        .stroke(Color.white.opacity(0.9), lineWidth: 1.5)
+                    cornerBrackets(for: r)
                     Text("\(Int(r.width))×\(Int(r.height)) — release to confirm")
                         .font(.caption).padding(6)
                         .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 6))
@@ -75,5 +84,29 @@ struct AreaSelectionView: View {
                 })
         }
         .ignoresSafeArea()
+    }
+
+    /// Decorative inward L-brackets at each selection corner (Screen Charm-style resize markers).
+    /// Purely visual — the selection still confirms on release, with no resize/edit phase.
+    private func cornerBrackets(for r: CGRect) -> some View {
+        let leg: CGFloat = 18
+        return Path { p in
+            p.move(to: CGPoint(x: r.minX, y: r.minY + leg))
+            p.addLine(to: CGPoint(x: r.minX, y: r.minY))
+            p.addLine(to: CGPoint(x: r.minX + leg, y: r.minY))
+
+            p.move(to: CGPoint(x: r.maxX - leg, y: r.minY))
+            p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+            p.addLine(to: CGPoint(x: r.maxX, y: r.minY + leg))
+
+            p.move(to: CGPoint(x: r.minX, y: r.maxY - leg))
+            p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
+            p.addLine(to: CGPoint(x: r.minX + leg, y: r.maxY))
+
+            p.move(to: CGPoint(x: r.maxX - leg, y: r.maxY))
+            p.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
+            p.addLine(to: CGPoint(x: r.maxX, y: r.maxY - leg))
+        }
+        .stroke(Color.white, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
     }
 }

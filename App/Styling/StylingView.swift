@@ -12,7 +12,9 @@ struct StylingView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
             Divider()
-            HSplitView {
+            HStack(spacing: 0) {
+                InspectorView(model: model)
+                Divider()
                 ZStack {
                     PlayerView(player: model.player)
                     WebcamDragOverlay(model: model)
@@ -23,7 +25,7 @@ struct StylingView: View {
                     }
                 }
                 .frame(minWidth: 480, minHeight: 320)
-                InspectorView(model: model)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .alert("OpenCharm", isPresented: Binding(
