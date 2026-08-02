@@ -17,6 +17,7 @@ final class StylingModel: ObservableObject {
     private(set) var package: ProjectPackage
     private(set) var sourceCanvasSize = CGSize(width: 1920, height: 1080)
     private var videoDebounce: Task<Void, Never>?
+    private var audioDebounce: Task<Void, Never>?
     private var saveDebounce: Task<Void, Never>?
 
     init(package: ProjectPackage) {
@@ -37,27 +38,47 @@ final class StylingModel: ObservableObject {
 
     /// Raw or cache-processed audio depending on toggles. forPreview=false is identical today;
     /// kept as a parameter so export always states its intent explicitly.
+    ///
+    /// Thin wrapper around the `nonisolated` static below — Task 19's export path calls this
+    /// instance method, so its signature must not change. Safe to call on the main actor only
+    /// when the audio cache is already warm (e.g. from `rebuildVideoComposition()`, where only
+    /// render settings changed and `AudioCache.processedURL` is just a fast file-existence
+    /// check). Callers that might trigger first-run generation (`rebuildComposition()`) must
+    /// go through `buildTimeline` directly from a detached task instead — see there.
     func timeline(forPreview: Bool) throws -> MediaTimeline {
+        try Self.buildTimeline(manifest: package.manifest, packageURL: package.url,
+                               cacheDir: package.cacheDir, audioSettings: audioSettings,
+                               forPreview: forPreview)
+    }
+
+    /// Plain-value variant of `timeline(forPreview:)` with no dependency on `self` or the main
+    /// actor, so it can run entirely inside a detached task. `AudioCache.processedURL` can take
+    /// real time on a cache miss (RNNoise on minutes of audio) and that must never block the
+    /// main actor — which a method isolated to `self` (a `@MainActor` instance) cannot avoid,
+    /// since calling it at all requires being on the main actor.
+    nonisolated static func buildTimeline(manifest: ProjectManifest, packageURL: URL,
+                                          cacheDir: URL, audioSettings: AudioSettings,
+                                          forPreview: Bool) throws -> MediaTimeline {
         var audio: [MediaTimeline.AudioTrack] = []
-        if let mic = package.manifest.mic {
+        if let mic = manifest.mic {
             let url = try AudioCache.processedURL(
-                for: package.url.appendingPathComponent(mic.filename),
-                cacheDir: package.cacheDir,
+                for: packageURL.appendingPathComponent(mic.filename),
+                cacheDir: cacheDir,
                 denoise: audioSettings.noiseRemoval, enhance: audioSettings.voiceEnhance)
             audio.append(.init(url: url, startOffset: mic.startOffset,
                                volume: audioSettings.micVolume))
         }
-        if let sys = package.manifest.systemAudio {
+        if let sys = manifest.systemAudio {
             // System audio never gets voice processing — only volume.
-            audio.append(.init(url: package.url.appendingPathComponent(sys.filename),
+            audio.append(.init(url: packageURL.appendingPathComponent(sys.filename),
                                startOffset: sys.startOffset,
                                volume: audioSettings.systemVolume))
         }
         return MediaTimeline(
-            screen: .init(url: package.screenURL,
-                          startOffset: package.manifest.screen.startOffset),
-            webcam: package.manifest.webcam.map {
-                .init(url: package.url.appendingPathComponent($0.filename),
+            screen: .init(url: packageURL.appendingPathComponent(manifest.screen.filename),
+                          startOffset: manifest.screen.startOffset),
+            webcam: manifest.webcam.map {
+                .init(url: packageURL.appendingPathComponent($0.filename),
                       startOffset: $0.startOffset)
             },
             audio: audio)
@@ -78,16 +99,28 @@ final class StylingModel: ObservableObject {
         processingAudio = true
         defer { processingAudio = false }
         do {
-            // Cache generation may be slow the first time — hop off the main actor.
+            // Snapshot everything the detached task needs as plain (Sendable) values — it must
+            // not touch `self`, a `@MainActor` instance, or cache generation (which can take
+            // real time on a cache miss) would hop back onto the main actor to reach it.
+            let manifest = package.manifest
+            let packageURL = package.url
+            let cacheDir = package.cacheDir
+            let audio = audioSettings
             let settings = renderSettings
             let canvas = sourceCanvasSize
             let bg = resolvedBackgroundImage()
-            let timeline = try await Task.detached { [self] in
-                try await MainActor.run { try self.timeline(forPreview: true) }
+            let timeline = try await Task.detached {
+                try Self.buildTimeline(manifest: manifest, packageURL: packageURL,
+                                       cacheDir: cacheDir, audioSettings: audio,
+                                       forPreview: true)
             }.value
+            // A newer audio-settings change may have superseded us while we were off doing
+            // cache generation — don't clobber the player with a stale result.
+            guard !Task.isCancelled else { return }
             let built = try await ProjectCompositionBuilder.build(
                 timeline: timeline, settings: settings, canvasSize: canvas,
                 backgroundImage: bg)
+            guard !Task.isCancelled else { return }
             let item = AVPlayerItem(asset: built.composition)
             item.videoComposition = built.videoComposition
             item.audioMix = built.audioMix
@@ -111,6 +144,7 @@ final class StylingModel: ObservableObject {
                     timeline: try timeline(forPreview: true),
                     settings: renderSettings, canvasSize: sourceCanvasSize,
                     backgroundImage: resolvedBackgroundImage())
+                guard !Task.isCancelled else { return }
                 item.videoComposition = built.videoComposition
                 if player.rate == 0 { // refresh the paused frame
                     await player.seek(to: player.currentTime(),
@@ -126,7 +160,12 @@ final class StylingModel: ObservableObject {
     }
 
     private func audioSettingsChanged() {
-        Task { await rebuildComposition() }
+        audioDebounce?.cancel()
+        audioDebounce = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard let self, !Task.isCancelled else { return }
+            await self.rebuildComposition()
+        }
         persist()
     }
 

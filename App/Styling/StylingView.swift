@@ -17,7 +17,10 @@ struct StylingView: View {
             .frame(minWidth: 480, minHeight: 320)
             InspectorView(model: model)
         }
-        .alert("OpenCharm", isPresented: .constant(model.errorMessage != nil)) {
+        .alert("OpenCharm", isPresented: Binding(
+            get: { model.errorMessage != nil },
+            set: { if !$0 { model.errorMessage = nil } }
+        )) {
             Button("OK") { model.errorMessage = nil }
         } message: { Text(model.errorMessage ?? "") }
         .toolbar {
