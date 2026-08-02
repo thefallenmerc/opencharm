@@ -2,20 +2,29 @@
 
 Capture cannot run on CI — walk this list on real hardware.
 
-1. Fresh permissions: revoke all three in System Settings, launch, panel shows
-   onboarding rows, deep links land on the right pane.
-2. Full-screen + webcam + mic + system audio, 60 fps, 10 s with music playing
-   and speech: tracks exist, styled preview plays, mic/system audible, no drift
-   between cursor motion on screen and click sounds.
-3. Window mode on a Safari window; area mode on a ~800×600 region: exported
-   dimensions match (even-rounded).
-4. Self-view bubble never appears in the recording; bubble draggable while recording.
-5. Noise removal toggle: audible hiss reduction; second toggle instant (cache).
-6. Export Source/1080p/4K in both codecs; files play in QuickTime; canvas aspect
-   preserved; Reveal in Finder works.
-7. Kill the app (Activity Monitor → Force Quit) 5 s into a recording. Relaunch:
-   recovery prompt appears; recovered project opens and plays everything up to
-   ~2 s before the kill.
-8. Unplug an external webcam mid-recording: recording continues; stop succeeds;
-   bubble simply ends in the preview.
-9. Reopen a day-old project via ⌘O: settings restored exactly, re-export works.
+1. Fresh permissions: revoke all three in System Settings, launch. Dock appears;
+   clicking any source opens the permission popover; deep links land on the right
+   pane; after granting, sources start normally.
+2. Launch: dock + live webcam bubble appear with no clicks. Camera toggle off →
+   bubble hides AND camera light turns off; on → live again. Right-click Camera/Mic
+   to switch devices.
+3. Display + camera + mic + system audio, 60 fps, 10 s with music and speech:
+   click Display → countdown → dock morphs to timer + Stop; tracks exist, styled
+   preview opens on stop, mic/system audible, no drift.
+4. Window mode on a Safari window; Area mode on a ~800×600 region (drag →
+   countdown starts immediately): exported dimensions match (even-rounded).
+5. Neither the dock, the stop bar, nor the bubble appear anywhere in any
+   recording; bubble draggable while recording; dock draggable always, and its
+   position persists across relaunch. On a fullscreen app, four-finger-swipe to
+   another Space: the bubble follows and the stop bar stays reachable.
+6. ✕ hides the dock; menu bar → Show Dock brings it back. Open Project… (menu,
+   ⌘O, and dock right-click) opens a chosen .opencharm; bad selection shows an
+   error alert.
+7. Noise removal toggle: audible hiss reduction; second toggle instant (cache).
+8. Export Source/1080p/4K in both codecs; files play in QuickTime; the webcam
+   overlay fills its circle (no squeeze/stretch); Reveal in Finder works.
+9. Kill the app (Force Quit) 5 s into a recording. Relaunch: recovery prompt at
+   launch; recovered project opens in the Studio and plays up to ~2 s before the
+   kill.
+10. Unplug an external webcam mid-recording: recording continues; stop succeeds;
+    idle preview resumes on the remaining camera (or hides bubble if none).

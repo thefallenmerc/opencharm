@@ -69,17 +69,17 @@ DerivedData, e.g.:
 
     open ~/Library/Developer/Xcode/DerivedData/OpenCharm-*/Build/Products/Debug/OpenCharm.app
 
-**OpenCharm is a menu bar app — it has no Dock icon and opens no window at
-launch.** After launching, look for the record-circle icon
-(`record.circle`) in the top-right of the menu bar and click it to open the
-recorder panel; there is nothing else to click on screen. (This trips
-people up on first run — if nothing seems to have happened, check the menu
-bar first.)
+**OpenCharm opens a floating "What to record?" dock plus a live webcam bubble at
+launch** (it has no Dock icon). Click Display / Window / Area on the dock to start
+— it goes straight to a countdown and records, and the dock morphs into a compact
+stop bar (red dot + timer + Stop) while recording. The record-circle menu bar icon
+(`record.circle`) remains for **Show Dock**, **Open Project…** (⌘O), and **Quit**;
+use it to bring the dock back after hiding it with the dock's ✕.
 
-**First run**: the panel shows a permissions checklist (Screen Recording,
-Camera, Microphone) with a "Grant" button per row — clicking one opens
-System Settings and prompts the OS dialog; switch back to OpenCharm and the
-row updates automatically once granted. Recordings are saved under
+**First run**: clicking a source on the dock opens a permissions popover
+(Screen Recording, Camera, Microphone) with a "Grant" button per row — clicking
+one opens System Settings and prompts the OS dialog; switch back to OpenCharm and
+the row updates automatically once granted. Recordings are saved under
 `~/Movies/OpenCharm/` as reopenable `.opencharm` packages.
 
     make test      # runs all package unit tests

@@ -1,3 +1,4 @@
+import AppKit
 import Recording
 import ScreenCaptureKit
 import SwiftUI
@@ -18,8 +19,10 @@ struct DockView: View {
     var body: some View {
         Group {
             switch model.engine.state {
-            case .recording, .stopping:
-                recordingPlaceholder // Task 4 replaces this with the stop bar
+            case .recording(let startedAt):
+                recordingBar(since: startedAt)
+            case .stopping:
+                stoppingBar
             case .idle:
                 idleDock
             }
@@ -29,10 +32,43 @@ struct DockView: View {
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous)
             .fill(Color.black.opacity(0.82)))
         .fixedSize()
+        .contextMenu {
+            Picker("Frame rate", selection: $sources.fps) {
+                Text("60 fps").tag(60)
+                Text("30 fps").tag(30)
+            }
+            Divider()
+            Button("Open Project…") { model.openProjectPanel() }
+            Button("Quit OpenCharm") { NSApp.terminate(nil) }
+        }
     }
 
-    var recordingPlaceholder: some View {
-        Text("Recording…").foregroundStyle(.white)
+    private func recordingBar(since start: Date) -> some View {
+        HStack(spacing: 14) {
+            Circle().fill(Color.red).frame(width: 10, height: 10)
+            TimelineView(.periodic(from: start, by: 1)) { context in
+                let s = max(0, Int(context.date.timeIntervalSince(start)))
+                Text(String(format: "%02d:%02d", s / 60, s % 60))
+                    .font(.system(size: 15, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(.white)
+            }
+            Button {
+                Task { await model.stopRecording() }
+            } label: {
+                Label("Stop", systemImage: "stop.circle.fill")
+                    .foregroundStyle(.white)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+        }
+        .padding(.horizontal, 6)
+    }
+
+    private var stoppingBar: some View {
+        HStack(spacing: 12) {
+            ProgressView().controlSize(.small)
+            Text("Finishing…").foregroundStyle(.white)
+        }
     }
 
     var idleDock: some View {
@@ -66,9 +102,32 @@ struct DockView: View {
                              isOn: sources.cameraEnabled) {
                     model.setCameraEnabled(!sources.cameraEnabled)
                 }
+                .contextMenu {
+                    ForEach(sources.cameras, id: \.uniqueID) { d in
+                        Button {
+                            sources.cameraID = d.uniqueID
+                            model.refreshIdlePreview()
+                        } label: {
+                            if d.uniqueID == sources.cameraID {
+                                Label(d.localizedName, systemImage: "checkmark")
+                            } else { Text(d.localizedName) }
+                        }
+                    }
+                }
                 toggleButton(on: "mic", off: "mic.slash", label: "Mic",
                              isOn: sources.micEnabled) {
                     model.setMicEnabled(!sources.micEnabled)
+                }
+                .contextMenu {
+                    ForEach(sources.mics, id: \.uniqueID) { d in
+                        Button {
+                            sources.micID = d.uniqueID
+                        } label: {
+                            if d.uniqueID == sources.micID {
+                                Label(d.localizedName, systemImage: "checkmark")
+                            } else { Text(d.localizedName) }
+                        }
+                    }
                 }
                 toggleButton(on: "speaker.wave.2", off: "speaker.slash",
                              label: "System Audio", isOn: sources.systemAudio) {
