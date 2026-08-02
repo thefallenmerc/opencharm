@@ -44,12 +44,22 @@ public final class TrackWriter {
         let newInput: AVAssetWriterInput
         switch kind {
         case .hevcVideo(let size, let fps):
+            // Encode at the *actual* dimensions of the first delivered frame, not the size the
+            // caller guessed up front. AVAssetWriterInput scales every appended frame to
+            // AVVideoWidth/HeightKey, so if a source (e.g. the webcam, whose configured size was
+            // derived from `activeFormat`) delivers a different aspect ratio, a fixed configured
+            // size anamorphically squeezes the whole recording. The screen path is unaffected:
+            // its buffers already match the configured capture size.
+            let frameDims = CMSampleBufferGetFormatDescription(sampleBuffer)
+                .map(CMVideoFormatDescriptionGetDimensions)
+            let width = frameDims.map { Int($0.width) } ?? Int(size.width)
+            let height = frameDims.map { Int($0.height) } ?? Int(size.height)
             let bitsPerPixelPerFrame = 0.08
-            let bitrate = Int(size.width * size.height * CGFloat(fps) * bitsPerPixelPerFrame)
+            let bitrate = Int(Double(width * height) * Double(fps) * bitsPerPixelPerFrame)
             newInput = AVAssetWriterInput(mediaType: .video, outputSettings: [
                 AVVideoCodecKey: AVVideoCodecType.hevc,
-                AVVideoWidthKey: Int(size.width),
-                AVVideoHeightKey: Int(size.height),
+                AVVideoWidthKey: width,
+                AVVideoHeightKey: height,
                 AVVideoCompressionPropertiesKey: [
                     AVVideoAverageBitRateKey: bitrate,
                     AVVideoExpectedSourceFrameRateKey: fps,

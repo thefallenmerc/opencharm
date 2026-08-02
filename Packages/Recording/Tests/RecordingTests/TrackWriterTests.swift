@@ -32,6 +32,30 @@ final class TrackWriterTests: XCTestCase {
         XCTAssertEqual(tracks.count, 1)
     }
 
+    /// Regression (webcam squeeze): the writer is configured with a *guessed* size at start
+    /// (WebcamRecorder derived it from the camera's `activeFormat`), but the frames actually
+    /// delivered can have a different aspect ratio. `AVAssetWriterInput` scales every appended
+    /// frame to `AVVideoWidth/HeightKey`, so a wrong configured size anamorphically squeezes the
+    /// recording — the live preview (which renders raw buffers) looks fine while the file is
+    /// distorted. The writer must instead encode at each frame's true dimensions. Configure a
+    /// SQUARE writer, feed 3:2 frames, and require a 3:2 track out.
+    func testVideoWriterHonorsSourceFrameDimensions() async throws {
+        let url = tempURL("mov")
+        let writer = try TrackWriter(url: url, kind: .hevcVideo(size: CGSize(width: 64, height: 64), fps: 30))
+        let start = CMClockGetTime(CMClockGetHostTimeClock())
+        for i in 0..<30 {
+            let pts = CMTimeAdd(start, CMTime(value: CMTimeValue(i), timescale: 30))
+            writer.append(SampleBufferFactory.videoBuffer(pts: pts, size: CGSize(width: 96, height: 64)))
+            try await Task.sleep(nanoseconds: NSEC_PER_SEC / 30)
+        }
+        try await writer.finish()
+
+        let asset = AVURLAsset(url: url)
+        let track = try await asset.loadTracks(withMediaType: .video).first
+        let size = try await track!.load(.naturalSize)
+        XCTAssertEqual(size, CGSize(width: 96, height: 64))
+    }
+
     func testAudioPassthroughToCAF() async throws {
         let url = tempURL("caf")
         let writer = try TrackWriter(url: url, kind: .passthroughAudio)
