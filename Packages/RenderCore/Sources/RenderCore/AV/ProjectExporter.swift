@@ -173,15 +173,21 @@ public final class ProjectExporter {
     /// Bridges `pump`'s completion-callback loop into a single-resume `async throws`.
     /// Two independent triggers can resume it — the `requestMediaDataWhenReady` callback
     /// (on the pump's own serial queue) and a task-cancellation handler (on an arbitrary
-    /// thread, once a sibling pump fails and `export()` cancels the group) — so both the
-    /// "mark the input finished" step and the "resume the continuation" step are guarded
-    /// by one lock to stay safe under either interleaving, including cancellation arriving
-    /// before the continuation has even been registered.
+    /// thread, once a sibling pump fails and `export()` cancels the group) — so `finish`
+    /// guards `input.markAsFinished()` and the continuation resume behind one lock, keyed
+    /// off `pendingResult`, to stay safe under either interleaving (including cancellation
+    /// arriving before the continuation has even been registered). That guard alone makes
+    /// `finish`'s body single-execution, so at most one call ever reaches `markAsFinished()`.
+    ///
+    /// `finish` itself, however, MUST only be *invoked* from `input`'s own serial queue —
+    /// AVAssetWriterInput requires `markAsFinished()`/`append(_:)`/`isReadyForMoreMediaData`
+    /// all come from the same queue, and `onCancel` below runs on an arbitrary thread that
+    /// could otherwise call `markAsFinished()` concurrently with an in-flight `append()`. See
+    /// `pump`'s `onCancel`, which hops onto that queue via `queue.async` before calling this.
     private final class PumpContinuation: @unchecked Sendable {
         private let lock = NSLock()
         private var continuation: CheckedContinuation<Void, Error>?
         private var pendingResult: Result<Void, Error>?
-        private var finishedInput = false
 
         func register(_ continuation: CheckedContinuation<Void, Error>) {
             lock.lock()
@@ -198,12 +204,10 @@ public final class ProjectExporter {
             lock.lock()
             guard pendingResult == nil else { lock.unlock(); return }
             pendingResult = result
-            let alreadyFinishedInput = finishedInput
-            finishedInput = true
             let continuation = self.continuation
             self.continuation = nil
             lock.unlock()
-            if !alreadyFinishedInput { input.markAsFinished() }
+            input.markAsFinished()
             if let continuation { Self.settle(continuation, result) }
         }
 
@@ -249,7 +253,15 @@ public final class ProjectExporter {
         } onCancel: {
             // The real failure (if any) is already carried by whichever sibling pump threw
             // first; this pump just needs to stop cleanly so the group can finish draining.
-            box.finish(input, .success(()))
+            // `onCancel` runs on an arbitrary thread, so hop onto `queue` — the only queue
+            // allowed to touch `input` — before calling `finish` (which calls
+            // `markAsFinished()`); calling it directly here could otherwise race a
+            // concurrently in-flight `append()` already running on `queue`. If the pump's
+            // own callback has already resolved `box` by the time this runs, `finish`'s
+            // `pendingResult` guard makes this a harmless no-op; if the callback is
+            // mid-loop, it keeps running until it next checks `tick`/readiness and returns,
+            // at which point `queue` is free and this queued hop runs.
+            queue.async { box.finish(input, .success(())) }
         }
     }
 }
