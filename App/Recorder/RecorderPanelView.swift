@@ -5,6 +5,7 @@ import SwiftUI
 struct RecorderPanelView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var sources: SourcePickerModel
+    @Environment(\.openWindow) private var openWindow
 
     init(model: AppModel) {
         self.model = model
@@ -29,6 +30,7 @@ struct RecorderPanelView: View {
         .padding(14)
         .frame(width: 300)
         .task { await sources.refresh() }
+        .onAppear { model.openStylingWindow = { openWindow(id: "styling") } }
     }
 
     var idleBody: some View {

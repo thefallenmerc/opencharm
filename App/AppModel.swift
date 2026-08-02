@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Combine
 import ProjectStore
@@ -19,6 +20,8 @@ final class AppModel: ObservableObject {
     var overlayWindowNumbers: [Int] = []
     /// Set when recording finishes; Task 18's styling window observes this.
     @Published var finishedProject: ProjectPackage?
+    /// Set by the menu-bar view via `@Environment(\.openWindow)`; opens the Studio window.
+    var openStylingWindow: (() -> Void)?
 
     private var cancellables: Set<AnyCancellable> = []
     private var selfView: SelfViewWindow?
@@ -63,7 +66,11 @@ final class AppModel: ObservableObject {
 
     func stopRecording() async {
         selfView?.close(); selfView = nil
-        do { finishedProject = try await engine.stop() }
+        do {
+            finishedProject = try await engine.stop()
+            NSApp.activate(ignoringOtherApps: true)
+            openStylingWindow?()
+        }
         catch { lastError = "Could not finish recording: \(error.localizedDescription)" }
     }
 
