@@ -39,12 +39,13 @@ final class StylingModel: ObservableObject {
     /// Raw or cache-processed audio depending on toggles. forPreview=false is identical today;
     /// kept as a parameter so export always states its intent explicitly.
     ///
-    /// Thin wrapper around the `nonisolated` static below — Task 19's export path calls this
-    /// instance method, so its signature must not change. Safe to call on the main actor only
-    /// when the audio cache is already warm (e.g. from `rebuildVideoComposition()`, where only
-    /// render settings changed and `AudioCache.processedURL` is just a fast file-existence
-    /// check). Callers that might trigger first-run generation (`rebuildComposition()`) must
-    /// go through `buildTimeline` directly from a detached task instead — see there.
+    /// Thin `@MainActor` wrapper around the `nonisolated` static below, kept for callers (and
+    /// tests) that only need it once the audio cache is already warm — a warm
+    /// `AudioCache.processedURL` is just a fast file-existence check. Every hot path that can
+    /// hit a COLD cache (`rebuildComposition()`, `rebuildVideoComposition()`, and
+    /// `ExportModel.begin()`) must instead call `buildTimeline` directly from a detached task,
+    /// never this method: a cache miss runs RNNoise synchronously and can take real time,
+    /// which must never block the main actor.
     func timeline(forPreview: Bool) throws -> MediaTimeline {
         try Self.buildTimeline(manifest: package.manifest, packageURL: package.url,
                                cacheDir: package.cacheDir, audioSettings: audioSettings,
@@ -140,10 +141,27 @@ final class StylingModel: ObservableObject {
             try? await Task.sleep(for: .milliseconds(100))
             guard let self, !Task.isCancelled, let item = player.currentItem else { return }
             do {
+                // Same reasoning as rebuildComposition(): a cold `AudioCache` entry runs
+                // RNNoise synchronously and can take real time, so `buildTimeline` must run
+                // off the main actor even though only render (not audio) settings changed
+                // here — the cache can still be cold the first time this fires. Snapshot
+                // everything the detached task needs as plain (Sendable) values.
+                let manifest = package.manifest
+                let packageURL = package.url
+                let cacheDir = package.cacheDir
+                let audio = audioSettings
+                let settings = renderSettings
+                let canvas = sourceCanvasSize
+                let bg = resolvedBackgroundImage()
+                let timeline = try await Task.detached {
+                    try Self.buildTimeline(manifest: manifest, packageURL: packageURL,
+                                           cacheDir: cacheDir, audioSettings: audio,
+                                           forPreview: true)
+                }.value
+                guard !Task.isCancelled else { return }
                 let built = try await ProjectCompositionBuilder.build(
-                    timeline: try timeline(forPreview: true),
-                    settings: renderSettings, canvasSize: sourceCanvasSize,
-                    backgroundImage: resolvedBackgroundImage())
+                    timeline: timeline, settings: settings, canvasSize: canvas,
+                    backgroundImage: bg)
                 guard !Task.isCancelled else { return }
                 item.videoComposition = built.videoComposition
                 if player.rate == 0 { // refresh the paused frame

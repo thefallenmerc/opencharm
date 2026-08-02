@@ -14,6 +14,12 @@ public struct RecordingConfiguration {
     public var micDeviceID: String?
     public var capturesSystemAudio: Bool
     public var fps: Int
+    /// Windows to exclude from `.display`/`.area` capture, matched by `SCWindow.windowID`.
+    /// Superseded by app-level exclusion when `ScreenRecorder.start()` can identify our own
+    /// app in `SCShareableContent.applications` (via `Bundle.main.bundleIdentifier`), which
+    /// excludes every window of ours — including ones opened after `start()` snapshots this
+    /// list. Retained as the fallback for contexts with no bundle identifier, e.g. `swift
+    /// test`.
     public var excludedWindowNumbers: [Int]
 
     public init(source: Source, webcamDeviceID: String? = nil, micDeviceID: String? = nil,

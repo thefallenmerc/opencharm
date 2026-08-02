@@ -11,6 +11,11 @@ final class CountdownWindow {
         guard window == nil else { return }
         let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 180, height: 180),
                            styleMask: .borderless, backing: .buffered, defer: false)
+        // This NSWindow is ARC-managed (held only by the `window` static and captured
+        // strongly by AppKit machinery); the default `isReleasedWhenClosed = true` would
+        // have AppKit also release it on `close()`, over-releasing and risking a
+        // use-after-free. ARC alone must own its lifetime.
+        win.isReleasedWhenClosed = false
         win.level = .screenSaver
         win.backgroundColor = .clear
         win.isOpaque = false

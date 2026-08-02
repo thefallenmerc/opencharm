@@ -44,16 +44,46 @@ for the implementation plan. Before each release, walk
 [`docs/SMOKE.md`](docs/SMOKE.md) — the capture-and-export paths can't run on
 CI and need a manual pass on real hardware.
 
-## Build
+## Build and Run
 
-    brew install xcodegen swiftformat
-    make build     # generates OpenCharm.xcodeproj and builds
-    make test      # runs package unit tests
+**Prerequisites**: macOS 14+, Xcode, and
 
-The first `make build`/`make gen`/`make test` downloads the ~74 MB RNNoise
-noise-removal model from Xiph's servers (checksum-verified; see
-`Tools/fetch-rnnoise-model.sh`) — it is not committed to the repo. Subsequent
-runs skip the download once it's cached locally. Run `make fetch-model` to
-fetch it on its own.
+    brew install xcodegen
 
-Open `OpenCharm.xcodeproj` (after `make gen`) to run from Xcode.
+Then:
+
+    make build     # generates OpenCharm.xcodeproj (via xcodegen) and builds it
+
+The first `make build` (equally `make gen` or `make test`) downloads the
+~74 MB RNNoise noise-removal model from Xiph's servers (checksum-verified;
+see `Tools/fetch-rnnoise-model.sh`) — it is not committed to the repo.
+Subsequent runs skip the download once it's cached locally. Run
+`make fetch-model` to fetch it on its own.
+
+To run: either
+
+    make gen && open OpenCharm.xcodeproj      # then hit ⌘R in Xcode
+
+or launch the `.app` `make build` just produced straight out of
+DerivedData, e.g.:
+
+    open ~/Library/Developer/Xcode/DerivedData/OpenCharm-*/Build/Products/Debug/OpenCharm.app
+
+**OpenCharm is a menu bar app — it has no Dock icon and opens no window at
+launch.** After launching, look for the record-circle icon
+(`record.circle`) in the top-right of the menu bar and click it to open the
+recorder panel; there is nothing else to click on screen. (This trips
+people up on first run — if nothing seems to have happened, check the menu
+bar first.)
+
+**First run**: the panel shows a permissions checklist (Screen Recording,
+Camera, Microphone) with a "Grant" button per row — clicking one opens
+System Settings and prompts the OS dialog; switch back to OpenCharm and the
+row updates automatically once granted. Recordings are saved under
+`~/Movies/OpenCharm/` as reopenable `.opencharm` packages.
+
+    make test      # runs all package unit tests
+
+Before each release, also walk [`docs/SMOKE.md`](docs/SMOKE.md) — the
+capture-and-export paths can't run on CI and need a manual pass on real
+hardware.

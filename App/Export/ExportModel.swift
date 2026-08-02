@@ -23,11 +23,30 @@ final class ExportModel: ObservableObject {
         phase = .exporting(0)
         Task {
             do {
+                // Export is frequently the first thing to touch a given audio-settings
+                // combination, so `AudioCache.processedURL` is often a cold miss here — RNNoise
+                // running synchronously on the main actor would freeze the export sheet's UI.
+                // Snapshot everything the detached task needs as plain (Sendable) values, then
+                // build the timeline off the main actor via the same `nonisolated` static
+                // StylingModel's own rebuild paths use, and hop back onto the main actor
+                // (implicit: this Task inherits @MainActor) for the phase updates below.
+                let manifest = styling.package.manifest
+                let packageURL = styling.package.url
+                let cacheDir = styling.package.cacheDir
+                let audio = styling.audioSettings
+                let settings = styling.renderSettings
+                let canvas = styling.sourceCanvasSize
+                let bg = styling.resolvedBackgroundImage()
+                let timeline = try await Task.detached {
+                    try StylingModel.buildTimeline(manifest: manifest, packageURL: packageURL,
+                                                   cacheDir: cacheDir, audioSettings: audio,
+                                                   forPreview: false)
+                }.value
                 let exporter = ProjectExporter(
-                    timeline: try styling.timeline(forPreview: false),
-                    settings: styling.renderSettings,
-                    sourceCanvasSize: styling.sourceCanvasSize,
-                    backgroundImage: styling.resolvedBackgroundImage())
+                    timeline: timeline,
+                    settings: settings,
+                    sourceCanvasSize: canvas,
+                    backgroundImage: bg)
                 self.exporter = exporter
                 try await exporter.export(
                     ExportRequest(outputURL: url, codec: codec, resolution: resolution)) { p in

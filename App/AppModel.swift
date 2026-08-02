@@ -191,19 +191,14 @@ final class AppModel: ObservableObject {
     }
 
     private func recordWithBubble() async {
-        // The bubble must exist BEFORE start so its window number can be excluded —
-        // but the preview layer only exists after the engine builds the webcam session.
-        // Order: pre-create an empty panel? No: exclusion only needs the number at
-        // SCContentFilter build time inside engine.start(). So: create bubble first
-        // with a placeholder layer requirement → instead we start, then show bubble,
-        // accepting the bubble may appear in the first frames? NOT acceptable.
-        //
-        // Resolution used here: WebcamRecorder is constructed inside engine.start()
-        // before SCShareableContent is queried only if the bubble exists first.
-        // Simplest correct sequencing:
-        //   1. Build the bubble window empty (no preview layer yet).
-        //   2. Pass its windowNumber via overlayWindowNumbers.
-        //   3. Start engine; when webcamPreviewLayer becomes available, attach it.
+        // Sequencing: the bubble window must exist, with its window number already in
+        // `overlayWindowNumbers`, before `startRecording()` calls `engine.start()` — window
+        // exclusion is fixed at SCContentFilter build time, so a window created afterward
+        // could not be retroactively excluded. Its `AVCaptureVideoPreviewLayer` isn't
+        // available that early, though: it only exists once the engine has built the webcam
+        // capture session. So the bubble is created first with a throwaway placeholder layer
+        // (an empty `NSWindow` still gets a window number without one), and the real preview
+        // layer is swapped in afterward, once `engine.webcamPreviewLayer` exists.
 
         // Guard against a bubble orphaned by a previous failed attempt: if it were left
         // around, the line below would silently drop it from overlayWindowNumbers (which

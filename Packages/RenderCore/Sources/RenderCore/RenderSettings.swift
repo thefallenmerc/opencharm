@@ -1,5 +1,4 @@
 import CoreGraphics
-import Foundation
 
 public struct RGBAColor: Codable, Equatable, Sendable {
     public var r, g, b, a: Double

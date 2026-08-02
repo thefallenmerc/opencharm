@@ -3,13 +3,13 @@ import SwiftUI
 
 /// Full-screen transparent overlay; drag to select a rect. Esc cancels, releasing confirms.
 final class AreaSelectorWindow: NSWindow {
-    private var onSelect: ((CGDirectDisplayID, CGRect) -> Void)?
-
     static func present(onSelect: @escaping (CGDirectDisplayID, CGRect) -> Void) {
         guard let screen = NSScreen.main else { return }
         let win = AreaSelectorWindow(
             contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
-        win.onSelect = onSelect
+        // ARC (not AppKit) owns this window's lifetime — see CountdownWindow.swift for the
+        // same reasoning. Without this, `close()` below over-releases it.
+        win.isReleasedWhenClosed = false
         win.level = .screenSaver
         win.backgroundColor = .clear
         win.isOpaque = false

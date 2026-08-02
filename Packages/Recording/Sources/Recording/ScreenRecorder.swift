@@ -35,7 +35,21 @@ public final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
             guard let display = content.displays.first(where: { $0.displayID == id }) else {
                 throw RecordingError.sourceUnavailable
             }
-            filter = SCContentFilter(display: display, excludingWindows: excluded)
+            // Exclude the whole app, not just today's known window numbers: the recorder
+            // panel, countdown overlay, and area-selector window can each open and close at
+            // any point during the recording, and `excludedWindowNumbers` is only a snapshot
+            // taken here at start() — so a window opened afterward (e.g. the panel reopened
+            // in the recording's final seconds) would otherwise slip into frame.
+            if let bundleID = Bundle.main.bundleIdentifier,
+               let ownApp = content.applications.first(where: { $0.bundleIdentifier == bundleID }) {
+                filter = SCContentFilter(display: display, excludingApplications: [ownApp],
+                                         exceptingWindows: [])
+            } else {
+                // No bundle identifier (e.g. `swift test`, which doesn't run inside an app
+                // bundle) or our app isn't listed in `content.applications` — fall back to
+                // the window-number snapshot so the gated integration test still works.
+                filter = SCContentFilter(display: display, excludingWindows: excluded)
+            }
         case .window(let window):
             filter = SCContentFilter(desktopIndependentWindow: window)
         }
