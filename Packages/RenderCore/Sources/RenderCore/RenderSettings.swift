@@ -45,14 +45,19 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     public var cornerRadiusFraction: Double
     public var shadow: ShadowSettings
     public var webcam: WebcamSettings
+    /// Auto zoom-on-click. Optional/additive: manifests written before this feature decode `nil`,
+    /// which consumers treat as `AutoZoomSettings.default` (disabled).
+    public var autoZoom: AutoZoomSettings?
 
     public init(background: Background, paddingFraction: Double, cornerRadiusFraction: Double,
-                shadow: ShadowSettings, webcam: WebcamSettings) {
+                shadow: ShadowSettings, webcam: WebcamSettings,
+                autoZoom: AutoZoomSettings? = nil) {
         self.background = background
         self.paddingFraction = paddingFraction
         self.cornerRadiusFraction = cornerRadiusFraction
         self.shadow = shadow
         self.webcam = webcam
+        self.autoZoom = autoZoom
     }
 
     public static let `default` = RenderSettings(

@@ -17,15 +17,17 @@ final class CharmInstruction: NSObject, AVVideoCompositionInstructionProtocol {
     let webcamTrackID: CMPersistentTrackID?
     let settings: RenderSettings
     let backgroundImage: CIImage?
+    let zoomSegments: [ZoomSegment]
 
     init(timeRange: CMTimeRange, screenTrackID: CMPersistentTrackID,
          webcamTrackID: CMPersistentTrackID?, settings: RenderSettings,
-         backgroundImage: CIImage?) {
+         backgroundImage: CIImage?, zoomSegments: [ZoomSegment] = []) {
         self.timeRange = timeRange
         self.screenTrackID = screenTrackID
         self.webcamTrackID = webcamTrackID
         self.settings = settings
         self.backgroundImage = backgroundImage
+        self.zoomSegments = zoomSegments
     }
 }
 
@@ -93,10 +95,12 @@ public final class CharmVideoCompositor: NSObject, AVVideoCompositing {
             webcamImage = CIImage(cvPixelBuffer: pb)
         }
 
+        let zoom = ZoomTimeline.state(at: request.compositionTime.seconds,
+                                      segments: instruction.zoomSegments)
         let rendered = compositor.render(
             RenderInputs(screen: screenImage, webcam: webcamImage,
                          backgroundImage: instruction.backgroundImage),
-            settings: instruction.settings, canvasSize: canvasSize)
+            settings: instruction.settings, canvasSize: canvasSize, zoom: zoom)
         context.render(rendered, to: output)
         request.finish(withComposedVideoFrame: output)
     }

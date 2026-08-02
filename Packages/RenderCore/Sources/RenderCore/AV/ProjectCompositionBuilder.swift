@@ -12,7 +12,8 @@ public enum CompositionError: Error { case missingVideoTrack(URL) }
 public enum ProjectCompositionBuilder {
     public static func build(timeline: MediaTimeline, settings: RenderSettings,
                              canvasSize: CGSize,
-                             backgroundImage: CIImage?) async throws -> BuiltComposition {
+                             backgroundImage: CIImage?,
+                             clicks: [ClickEvent] = []) async throws -> BuiltComposition {
         let composition = AVMutableComposition()
 
         func addVideo(_ track: MediaTimeline.VideoTrack) async throws -> CMPersistentTrackID {
@@ -53,10 +54,13 @@ public enum ProjectCompositionBuilder {
         videoComposition.customVideoCompositorClass = CharmVideoCompositor.self
         videoComposition.renderSize = canvasSize
         videoComposition.frameDuration = CMTime(value: 1, timescale: 60)
+        let zoomSegments = AutoZoom.segments(clicks: clicks,
+                                             settings: settings.autoZoom ?? .default)
         videoComposition.instructions = [CharmInstruction(
             timeRange: CMTimeRange(start: .zero, duration: composition.duration),
             screenTrackID: screenID, webcamTrackID: webcamID,
-            settings: settings, backgroundImage: backgroundImage)]
+            settings: settings, backgroundImage: backgroundImage,
+            zoomSegments: zoomSegments)]
 
         var audioMix: AVAudioMix?
         if !mixParams.isEmpty {

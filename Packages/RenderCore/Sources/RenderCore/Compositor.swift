@@ -15,11 +15,14 @@ public final class Compositor {
     public init() {}
 
     public func render(_ inputs: RenderInputs, settings: RenderSettings,
-                       canvasSize: CGSize) -> CIImage {
+                       canvasSize: CGSize, zoom: ZoomState = .identity) -> CIImage {
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
+        // Auto-zoom is a crop of the screen layer only; the crop preserves aspect, so the layout
+        // (contentRect, corner radius, webcam, shadow) is unaffected.
+        let screen = zoomedScreen(inputs.screen, zoom: zoom)
         let layout = CanvasLayout.compute(
             canvasSize: canvasSize,
-            screenAspect: inputs.screen.extent.width / inputs.screen.extent.height,
+            screenAspect: screen.extent.width / screen.extent.height,
             settings: settings)
 
         var result = backgroundLayer(settings.background, image: inputs.backgroundImage,
@@ -31,7 +34,7 @@ public final class Compositor {
                             offsetY: layout.shadowOffsetY)
                 .composited(over: result)
         }
-        result = place(inputs.screen, in: layout.contentRect,
+        result = place(screen, in: layout.contentRect,
                        cornerRadius: layout.cornerRadius, over: result)
         result = webcamLayer(inputs.webcam, settings: settings, layout: layout, over: result)
         // Contract: output is always opaque, regardless of any alpha < 1 in caller-supplied
@@ -39,6 +42,23 @@ public final class Compositor {
         let opaqueBackdrop = CIImage(color: .black).cropped(to: canvasRect)
         result = result.composited(over: opaqueBackdrop)
         return result.cropped(to: canvasRect)
+    }
+
+    /// Crops the screen to a `1/scale` window centered on `zoom.focus` (normalized, top-left),
+    /// clamped inside the frame so the zoomed content always fully covers its rect (no empty
+    /// edges). `scale == 1` returns the image unchanged.
+    func zoomedScreen(_ screen: CIImage, zoom: ZoomState) -> CIImage {
+        guard zoom.scale > 1.0001 else { return screen }
+        let e = screen.extent
+        let cw = e.width / CGFloat(zoom.scale)
+        let ch = e.height / CGFloat(zoom.scale)
+        let cx = e.minX + CGFloat(zoom.focus.x) * e.width
+        let cy = e.minY + (1 - CGFloat(zoom.focus.y)) * e.height // focus is top-left; CIImage is y-up
+        var minX = cx - cw / 2
+        var minY = cy - ch / 2
+        minX = min(max(minX, e.minX), e.maxX - cw)
+        minY = min(max(minY, e.minY), e.maxY - ch)
+        return screen.cropped(to: CGRect(x: minX, y: minY, width: cw, height: ch))
     }
 
     // MARK: layers
