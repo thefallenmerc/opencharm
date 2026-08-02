@@ -3,16 +3,15 @@ import AVFoundation
 import Combine
 import ProjectStore
 import Recording
+import ScreenCaptureKit
 import SwiftUI
 
 @MainActor
 final class AppModel: ObservableObject {
-    /// Self-registering hook so `AppDelegate.applicationDidFinishLaunching` — which runs before
-    /// SwiftUI has necessarily evaluated any lazy Scene content (in particular
-    /// `MenuBarExtra(.window)`'s `RecorderPanelView`, which only builds its `body` once the user
-    /// actually clicks the menu bar icon) — can reach the app's one `AppModel` instance without
-    /// SwiftUI plumbing. Set once, in `init()`, well before AppKit dispatches the launch
-    /// notification. See `OpenCharmApp.swift`.
+    /// Self-registering hook so `AppDelegate.applicationDidFinishLaunching` can reach the app's
+    /// one `AppModel` instance without SwiftUI plumbing (it drives launch recovery, the dock,
+    /// and the webcam bubble from there). Set once, in `init()`, well before AppKit dispatches
+    /// the launch notification. See `OpenCharmApp.swift`.
     static weak var shared: AppModel?
 
     let engine = RecordingEngine()
@@ -41,7 +40,7 @@ final class AppModel: ObservableObject {
         Self.shared = self
         // `engine` is a nested ObservableObject: its own @Published changes only emit on
         // `engine.objectWillChange`, not `self.objectWillChange`. Views that observe only
-        // `model` (RecorderPanelView, the MenuBarExtra label) would otherwise never
+        // `model` (DockView, the MenuBarExtra label) would otherwise never
         // re-render when `engine.state` changes. Forward the signal so they do.
         engine.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
@@ -50,7 +49,7 @@ final class AppModel: ObservableObject {
 
     /// Called by OnboardingView after re-checking permission status, so views observing
     /// only `model` (not the view-local @State in OnboardingView) also re-render — e.g.
-    /// RecorderPanelView switching out of the onboarding branch once everything's granted.
+    /// the dock's permission popover reflecting the new status once everything's granted.
     func permissionsChanged() {
         objectWillChange.send()
     }
@@ -71,6 +70,7 @@ final class AppModel: ObservableObject {
     /// Launch-time UI: called from AppDelegate after the recovery check. Requests
     /// camera permission on first launch, then starts the live self-view.
     func launchUI() {
+        showDock()
         Task {
             await sources.refresh()
             if PermissionsService.status(.camera) == .undetermined {
@@ -187,10 +187,37 @@ final class AppModel: ObservableObject {
         checkRecoveryOnLaunch()
     }
 
-    func beginAreaSelection() {
+    private var dock: DockPanel?
+
+    func showDock() {
+        if dock == nil { dock = DockPanel(content: DockView(model: self)) }
+        dock?.orderFront(nil)
+    }
+
+    func hideDock() {
+        dock?.orderOut(nil)
+    }
+
+    func startDisplayRecording(_ id: CGDirectDisplayID) {
+        sources.mode = .fullScreen
+        sources.selectedDisplayID = id
+        beginCountdownAndRecord()
+    }
+
+    func startWindowRecording(_ window: SCWindow) {
+        sources.mode = .window
+        sources.selectedWindow = window
+        beginCountdownAndRecord()
+    }
+
+    /// Area flow becomes click-to-go: select, then straight into the countdown.
+    func startAreaRecording() {
         AreaSelectorWindow.present { [weak self] displayID, rect in
-            self?.sources.selectedDisplayID = displayID
-            self?.sources.selectedArea = rect
+            guard let self else { return }
+            sources.mode = .area
+            sources.selectedDisplayID = displayID
+            sources.selectedArea = rect
+            beginCountdownAndRecord()
         }
     }
 

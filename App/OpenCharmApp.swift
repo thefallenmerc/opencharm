@@ -1,10 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// `MenuBarExtra(.window)`'s content (`RecorderPanelView`) is lazily instantiated — its `body`
-/// (and therefore its `onAppear`) only runs the first time the user actually clicks the menu bar
-/// icon, not at launch. Recovery-on-launch must not depend on that click, so it's driven from
-/// here instead, via the standard AppKit launch hook.
+/// The UI is driven from here at launch — recovery check, the floating dock, and the live
+/// webcam bubble — via the standard AppKit launch hook, rather than any lazy SwiftUI scene
+/// content. (The `MenuBarExtra` is now a plain menu; its buttons run immediately.)
 ///
 /// Reaching the app's single `AppModel` instance from an `NSApplicationDelegate` (which SwiftUI
 /// itself constructs, independently of `OpenCharmApp`'s own property wrappers) needs a hand-off:
@@ -28,11 +27,14 @@ struct OpenCharmApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            RecorderPanelView(model: model)
+            Button("Show Dock") { model.showDock() }
+            Button("Open Project…") { model.openProjectPanel() }
+                .keyboardShortcut("o")
+            Divider()
+            Button("Quit OpenCharm") { NSApp.terminate(nil) }
         } label: {
             Image(systemName: model.engine.state == .idle
                   ? "record.circle" : "record.circle.fill")
         }
-        .menuBarExtraStyle(.window)
     }
 }

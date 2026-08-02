@@ -16,8 +16,8 @@ struct OnboardingView: View {
         }
         .onAppear { refresh() }
         // Granting a permission happens in System Settings, outside the app. When the
-        // user switches back, re-check so rows go green and RecorderPanelView can drop
-        // out of the onboarding branch without the user having to relaunch or reopen.
+        // user switches back, re-check so rows go green and the dock's gated source
+        // actions unlock without the user having to relaunch or reopen the popover.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refresh()
             model.permissionsChanged()
