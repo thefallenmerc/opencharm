@@ -37,7 +37,7 @@ struct InspectorView: View {
             }
             Section("Webcam") {
                 Toggle("Show webcam", isOn: $model.renderSettings.webcam.visible)
-                slider("Size", $model.renderSettings.webcam.size, 0.1...0.5)
+                slider("Size", $model.renderSettings.webcam.size, 0.1...0.6)
                 slider("Roundness", $model.renderSettings.webcam.roundness, 0...1)
                 Picker("Position", selection: cornerPreset) {
                     Text("Bottom right").tag("br"); Text("Bottom left").tag("bl")
@@ -64,7 +64,7 @@ struct InspectorView: View {
     }
 
     var autoZoomEnabled: Binding<Bool> {
-        Binding { model.renderSettings.autoZoom?.enabled ?? false }
+        Binding { model.renderSettings.autoZoom?.enabled ?? AutoZoomSettings.default.enabled }
         set: { var z = model.renderSettings.autoZoom ?? .default; z.enabled = $0
                model.renderSettings.autoZoom = z }
     }

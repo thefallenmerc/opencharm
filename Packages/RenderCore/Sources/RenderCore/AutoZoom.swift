@@ -8,7 +8,7 @@ public struct AutoZoomSettings: Codable, Equatable, Sendable {
     public var level: Double   // target scale, clamped to 1.5…3 when generating
     public var speed: Double   // 0…1, higher = snappier
 
-    public init(enabled: Bool = false, level: Double = 2.0, speed: Double = 0.5) {
+    public init(enabled: Bool = true, level: Double = 2.0, speed: Double = 0.5) {
         self.enabled = enabled
         self.level = level
         self.speed = speed
@@ -45,34 +45,42 @@ public struct ZoomSegment: Equatable, Sendable {
 }
 
 /// The evaluated zoom for one instant: `scale` (1 = no zoom) about `focus` (normalized, top-left).
+/// `progress` is the eased 0…1 envelope (0 = out, 1 = fully zoomed) — used to shrink the webcam in
+/// step with the zoom.
 public struct ZoomState: Equatable, Sendable {
     public var scale: Double
     public var focus: CGPoint
-    public init(scale: Double, focus: CGPoint) { (self.scale, self.focus) = (scale, focus) }
-    public static let identity = ZoomState(scale: 1, focus: CGPoint(x: 0.5, y: 0.5))
+    public var progress: Double
+    public init(scale: Double, focus: CGPoint, progress: Double = 0) {
+        self.scale = scale; self.focus = focus; self.progress = progress
+    }
+    public static let identity = ZoomState(scale: 1, focus: CGPoint(x: 0.5, y: 0.5), progress: 0)
 }
 
 public enum AutoZoom {
-    // Clustering thresholds: clicks within this time gap AND spatial distance fold into one zoom.
-    static let timeGap = 1.4          // seconds
-    static let spaceGap = 0.22        // normalized distance
-    static let tail = 0.7             // linger after the last click in a cluster
+    static let chainGap = 2.0         // clicks within this many seconds of the last one chain
+    static let postClickHold = 1.0    // wait this long after the last click before easing out
 
     /// Deterministically turns clicks into non-overlapping zoom segments. Empty when disabled or
     /// when there are no clicks.
+    ///
+    /// Timing anticipates the click: the zoom-in *completes as the click lands* (it begins ~`leadIn`
+    /// seconds earlier, so you see the pointer arrive at an already-magnified target), holds through
+    /// the cluster plus `postClickHold`, then eases back out.
     public static func segments(clicks: [ClickEvent], settings: AutoZoomSettings) -> [ZoomSegment] {
         guard settings.enabled, !clicks.isEmpty else { return [] }
         let level = min(max(settings.level, 1.5), 3.0)
         let speed = min(max(settings.speed, 0), 1)
-        let easeIn = lerp(0.55, 0.22, speed)
-        let easeOut = lerp(0.75, 0.32, speed)
+        let leadIn = lerp(1.3, 0.7, speed)   // ~1s anticipation window at the default speed
+        let easeOut = lerp(0.8, 0.4, speed)
 
         let sorted = clicks.sorted { $0.time < $1.time }
+        // Chain by time only: a click within `chainGap` of the *previous* click extends the same
+        // zoom, regardless of where on screen it is. This keeps one steady hold through a burst of
+        // activity instead of flickering in and out on every click.
         var clusters: [[ClickEvent]] = []
         for c in sorted {
-            if var last = clusters.last, let lastT = last.last?.time,
-               c.time - lastT <= timeGap,
-               distance(c.point, centroid(last.map(\.point))) <= spaceGap {
+            if var last = clusters.last, let lastT = last.last?.time, c.time - lastT <= chainGap {
                 last.append(c)
                 clusters[clusters.count - 1] = last
             } else {
@@ -82,9 +90,11 @@ public enum AutoZoom {
 
         var segments = clusters.map { cluster -> ZoomSegment in
             let focus = centroid(cluster.map(\.point))
-            let start = max(0, cluster.first!.time)
-            var end = cluster.last!.time + tail
-            if end - start < easeIn + easeOut { end = start + easeIn + easeOut }
+            let firstT = cluster.first!.time
+            let lastT = cluster.last!.time
+            let start = max(0, firstT - leadIn)
+            let easeIn = firstT - start          // fully zoomed exactly at the first click
+            let end = lastT + postClickHold + easeOut
             return ZoomSegment(start: start, end: end, easeIn: easeIn, easeOut: easeOut,
                                focus: focus, scale: level)
         }
@@ -103,10 +113,6 @@ public enum AutoZoom {
                        y: points.map(\.y).reduce(0, +) / n)
     }
 
-    static func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
-        hypot(a.x - b.x, a.y - b.y)
-    }
-
     static func lerp(_ a: Double, _ b: Double, _ t: Double) -> Double { a + (b - a) * t }
 }
 
@@ -115,7 +121,7 @@ public enum ZoomTimeline {
     public static func state(at t: Double, segments: [ZoomSegment]) -> ZoomState {
         guard let s = segments.first(where: { t >= $0.start && t < $0.end }) else { return .identity }
         let f = envelope(t, s)
-        return ZoomState(scale: 1 + (s.scale - 1) * f, focus: s.focus)
+        return ZoomState(scale: 1 + (s.scale - 1) * f, focus: s.focus, progress: f)
     }
 
     /// 0 at the segment edges, 1 across the hold, smoothstepped through the ease ramps.

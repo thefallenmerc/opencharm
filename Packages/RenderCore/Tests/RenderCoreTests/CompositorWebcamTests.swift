@@ -19,6 +19,7 @@ final class CompositorWebcamTests: XCTestCase {
     func testCircleBubbleGolden() throws {
         var s = RenderSettings.default // roundness 1, bottom-right
         s.background = .solid(RGBAColor(r: 0.95, g: 0.9, b: 0.82))
+        s.webcam.size = 0.24 // pin the golden independent of the tunable default size
         let out = Compositor().render(
             RenderInputs(screen: screen(), webcam: webcam()),
             settings: s, canvasSize: CGSize(width: 400, height: 260))
@@ -28,6 +29,7 @@ final class CompositorWebcamTests: XCTestCase {
     func testRoundedRectBubbleGolden() throws {
         var s = RenderSettings.default
         s.background = .solid(RGBAColor(r: 0.95, g: 0.9, b: 0.82))
+        s.webcam.size = 0.24 // pin the golden independent of the tunable default size
         s.webcam.roundness = 0.25
         s.webcam.center = CGPoint(x: 0.15, y: 0.8) // bottom-left
         let out = Compositor().render(

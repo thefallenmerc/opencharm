@@ -69,5 +69,6 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         cornerRadiusFraction: 0.02,
         shadow: ShadowSettings(opacity: 0.45, radius: 0.03, offsetY: 0.012),
         webcam: WebcamSettings(visible: true, center: CGPoint(x: 0.87, y: 0.82),
-                               size: 0.24, roundness: 1.0))
+                               size: 0.48, roundness: 1.0),
+        autoZoom: .default)
 }

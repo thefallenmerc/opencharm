@@ -20,10 +20,17 @@ public final class Compositor {
         // Auto-zoom is a crop of the screen layer only; the crop preserves aspect, so the layout
         // (contentRect, corner radius, webcam, shadow) is unaffected.
         let screen = zoomedScreen(inputs.screen, zoom: zoom)
-        let layout = CanvasLayout.compute(
+        var layout = CanvasLayout.compute(
             canvasSize: canvasSize,
             screenAspect: screen.extent.width / screen.extent.height,
             settings: settings)
+        // Shrink the webcam bubble slightly while zoomed in, in step with the zoom envelope, so it
+        // stays unobtrusive over the magnified content (matches the reference).
+        if zoom.progress > 0 {
+            let f = CGFloat(1 - 0.15 * min(max(zoom.progress, 0), 1)) // up to 15% smaller
+            layout.webcamRect = shrink(layout.webcamRect, by: f)
+            layout.webcamCornerRadius *= f
+        }
 
         var result = backgroundLayer(settings.background, image: inputs.backgroundImage,
                                      canvasRect: canvasRect)
@@ -59,6 +66,12 @@ public final class Compositor {
         minX = min(max(minX, e.minX), e.maxX - cw)
         minY = min(max(minY, e.minY), e.maxY - ch)
         return screen.cropped(to: CGRect(x: minX, y: minY, width: cw, height: ch))
+    }
+
+    /// Scales a rect about its center by `f` (used to shrink the webcam bubble during zoom).
+    private func shrink(_ rect: CGRect, by f: CGFloat) -> CGRect {
+        let w = rect.width * f, h = rect.height * f
+        return CGRect(x: rect.midX - w / 2, y: rect.midY - h / 2, width: w, height: h)
     }
 
     // MARK: layers

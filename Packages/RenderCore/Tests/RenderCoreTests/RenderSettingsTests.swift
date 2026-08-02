@@ -8,8 +8,9 @@ final class RenderSettingsTests: XCTestCase {
         XCTAssertEqual(s.cornerRadiusFraction, 0.02, accuracy: 0.0001)
         XCTAssertTrue(s.webcam.visible)
         XCTAssertEqual(s.webcam.center, CGPoint(x: 0.87, y: 0.82)) // bottom-right, y measured from TOP
-        XCTAssertEqual(s.webcam.size, 0.24, accuracy: 0.0001)
+        XCTAssertEqual(s.webcam.size, 0.48, accuracy: 0.0001)
         XCTAssertEqual(s.webcam.roundness, 1.0, accuracy: 0.0001) // circle
+        XCTAssertEqual(s.autoZoom?.enabled, true) // zoom-on-click on by default
     }
 
     func testCodableRoundTrip() throws {

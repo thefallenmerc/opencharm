@@ -5,6 +5,10 @@ import XCTest
 final class AutoZoomTests: XCTestCase {
     private let on = AutoZoomSettings(enabled: true, level: 2.0, speed: 0.5)
 
+    func testDefaultIsEnabled() {
+        XCTAssertTrue(AutoZoomSettings.default.enabled)   // zoom-on-click is on by default
+    }
+
     func testDisabledOrEmptyYieldsNoSegments() {
         XCTAssertTrue(AutoZoom.segments(clicks: [ClickEvent(time: 1, point: .init(x: 0.5, y: 0.5))],
                                         settings: AutoZoomSettings(enabled: false)).isEmpty)
@@ -13,47 +17,64 @@ final class AutoZoomTests: XCTestCase {
 
     func testNearbyClicksClusterIntoOneSegmentAtCentroid() {
         let clicks = [
-            ClickEvent(time: 1.0, point: .init(x: 0.30, y: 0.40)),
-            ClickEvent(time: 1.3, point: .init(x: 0.34, y: 0.44)),
-            ClickEvent(time: 1.6, point: .init(x: 0.32, y: 0.42)),
+            ClickEvent(time: 3.0, point: .init(x: 0.30, y: 0.40)),
+            ClickEvent(time: 3.3, point: .init(x: 0.34, y: 0.44)),
+            ClickEvent(time: 3.6, point: .init(x: 0.32, y: 0.42)),
         ]
         let segs = AutoZoom.segments(clicks: clicks, settings: on)
         XCTAssertEqual(segs.count, 1)
         XCTAssertEqual(segs[0].focus.x, 0.32, accuracy: 0.001)
         XCTAssertEqual(segs[0].focus.y, 0.42, accuracy: 0.001)
         XCTAssertEqual(segs[0].scale, 2.0, accuracy: 0.0001)
-        XCTAssertEqual(segs[0].start, 1.0, accuracy: 0.0001)          // first click
-        XCTAssertGreaterThan(segs[0].end, 1.6)                        // lingers past the last click
+        // Anticipation: the zoom starts BEFORE the first click and is fully in exactly at it.
+        XCTAssertLessThan(segs[0].start, 3.0)
+        XCTAssertEqual(segs[0].start + segs[0].easeIn, 3.0, accuracy: 0.001)
+        XCTAssertGreaterThan(segs[0].end, 3.6 + 0.5)                  // lingers past the last click
     }
 
-    func testFarApartClicksSplitAndDoNotOverlap() {
+    func testZoomIsFullyInAtTheClickAndHoldsAfter() {
+        let segs = AutoZoom.segments(clicks: [ClickEvent(time: 5.0, point: .init(x: 0.4, y: 0.4))],
+                                     settings: on)
+        // At the click moment the zoom is at full level; it stays there through the post-click hold.
+        XCTAssertEqual(ZoomTimeline.state(at: 5.0, segments: segs).scale, 2.0, accuracy: 0.01)
+        XCTAssertEqual(ZoomTimeline.state(at: 5.3, segments: segs).scale, 2.0, accuracy: 0.01)
+        // A second before the click it is still ramping in (not yet full, but zooming).
+        let before = ZoomTimeline.state(at: 4.5, segments: segs).scale
+        XCTAssertGreaterThan(before, 1.0)
+        XCTAssertLessThan(before, 2.0)
+    }
+
+    func testTimeSeparatedClicksSplitAndDoNotOverlap() {
         let clicks = [
-            ClickEvent(time: 1.0, point: .init(x: 0.15, y: 0.15)),    // top-left region
-            ClickEvent(time: 3.0, point: .init(x: 0.85, y: 0.85)),    // far away + later
+            ClickEvent(time: 1.0, point: .init(x: 0.15, y: 0.15)),
+            ClickEvent(time: 4.0, point: .init(x: 0.85, y: 0.85)),    // >2s later → new zoom
         ]
         let segs = AutoZoom.segments(clicks: clicks, settings: on)
         XCTAssertEqual(segs.count, 2)
-        // Distinct focal points.
         XCTAssertLessThan(segs[0].focus.x, 0.3)
         XCTAssertGreaterThan(segs[1].focus.x, 0.7)
-        // Non-overlapping and time-ordered.
-        XCTAssertLessThanOrEqual(segs[0].end, segs[1].start + 1e-9)
+        XCTAssertLessThanOrEqual(segs[0].end, segs[1].start + 1e-9)   // non-overlapping
     }
 
-    func testSpatiallyFarButTemporallyCloseClicksSplit() {
+    func testTemporallyCloseClicksChainRegardlessOfLocation() {
+        // The core anti-flicker rule: clicks within the chain gap stay ONE zoom even if they're on
+        // opposite corners — don't zoom out and back in between them.
         let clicks = [
             ClickEvent(time: 1.0, point: .init(x: 0.1, y: 0.1)),
-            ClickEvent(time: 1.2, point: .init(x: 0.9, y: 0.9)), // close in time, far in space
+            ClickEvent(time: 1.2, point: .init(x: 0.9, y: 0.9)),
+            ClickEvent(time: 2.9, point: .init(x: 0.5, y: 0.2)), // still within 2s of the previous
         ]
-        XCTAssertEqual(AutoZoom.segments(clicks: clicks, settings: on).count, 2)
+        let segs = AutoZoom.segments(clicks: clicks, settings: on)
+        XCTAssertEqual(segs.count, 1)
+        XCTAssertGreaterThan(segs[0].end, 2.9 + 1.0)  // holds ~1s past the last click, then eases out
     }
 
     func testSpeedAffectsEaseDurations() {
-        let slow = AutoZoom.segments(clicks: [ClickEvent(time: 1, point: .init(x: 0.5, y: 0.5))],
+        let slow = AutoZoom.segments(clicks: [ClickEvent(time: 5, point: .init(x: 0.5, y: 0.5))],
                                      settings: AutoZoomSettings(enabled: true, level: 2, speed: 0.0))
-        let fast = AutoZoom.segments(clicks: [ClickEvent(time: 1, point: .init(x: 0.5, y: 0.5))],
+        let fast = AutoZoom.segments(clicks: [ClickEvent(time: 5, point: .init(x: 0.5, y: 0.5))],
                                      settings: AutoZoomSettings(enabled: true, level: 2, speed: 1.0))
-        XCTAssertGreaterThan(slow[0].easeIn, fast[0].easeIn)
+        XCTAssertGreaterThan(slow[0].easeIn, fast[0].easeIn)   // slower = longer anticipation
         XCTAssertGreaterThan(slow[0].easeOut, fast[0].easeOut)
     }
 
@@ -83,6 +104,14 @@ final class AutoZoomTests: XCTestCase {
         let nearEnd = ZoomTimeline.state(at: 3.99, segments: [seg])
         XCTAssertLessThan(nearEnd.scale, 2.0)                     // easing back out
         XCTAssertGreaterThan(nearEnd.scale, 1.0)
+    }
+
+    func testProgressIsZeroOutsideAndFullAtClick() {
+        // progress drives the webcam shrink: 0 = no zoom (full-size bubble), 1 = fully zoomed.
+        let segs = AutoZoom.segments(clicks: [ClickEvent(time: 5, point: .init(x: 0.4, y: 0.4))],
+                                     settings: on)
+        XCTAssertEqual(ZoomTimeline.state(at: 0.0, segments: segs).progress, 0.0, accuracy: 0.0001)
+        XCTAssertEqual(ZoomTimeline.state(at: 5.0, segments: segs).progress, 1.0, accuracy: 0.02)
     }
 
     // MARK: Compositor crop geometry

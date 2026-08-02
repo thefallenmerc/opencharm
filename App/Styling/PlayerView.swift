@@ -43,6 +43,7 @@ struct WebcamDragOverlay: View {
             let shown = CGSize(width: canvas.width * scale, height: canvas.height * scale)
             let origin = CGPoint(x: (geo.size.width - shown.width) / 2,
                                  y: (geo.size.height - shown.height) / 2)
+            let minDim = min(canvas.width, canvas.height)
             // Recomputed on every render (not just inside the gesture) so the hit-test region
             // always tracks the CURRENT settings, not a stale bubble position from before the
             // last drag or a settings change made elsewhere (e.g. the styling sidebar).
@@ -52,23 +53,66 @@ struct WebcamDragOverlay: View {
             // `layout.webcamRect` is canvas-space, y-up (see CanvasLayout's doc comment);
             // convert to this view's space, which is top-left origin / y-down, same conversion
             // `onChanged` below already does for a single point, applied to the whole rect.
-            let bubbleViewRect = CGRect(
+            let visualRect = CGRect(
                 x: origin.x + layout.webcamRect.minX * scale,
                 y: origin.y + (canvas.height - layout.webcamRect.maxY) * scale,
                 width: layout.webcamRect.width * scale,
-                height: layout.webcamRect.height * scale
-            ).insetBy(dx: -20, dy: -20)
+                height: layout.webcamRect.height * scale)
+            let bubbleViewRect = visualRect.insetBy(dx: -20, dy: -20)
+            let center = CGPoint(x: visualRect.midX, y: visualRect.midY)
 
-            Color.clear
-                .contentShape(BubbleHitShape(rect: bubbleViewRect))
-                .gesture(DragGesture(minimumDistance: 2)
-                    .onChanged { v in
-                        guard model.renderSettings.webcam.visible else { return }
-                        let nx = (v.location.x - origin.x) / shown.width
-                        let ny = (v.location.y - origin.y) / shown.height // top-left, matches settings
-                        model.renderSettings.webcam.center = CGPoint(
-                            x: min(1, max(0, nx)), y: min(1, max(0, ny)))
-                    })
+            ZStack(alignment: .topLeading) {
+                Color.clear
+                    .contentShape(BubbleHitShape(rect: bubbleViewRect))
+                    .gesture(DragGesture(minimumDistance: 2)
+                        .onChanged { v in
+                            guard model.renderSettings.webcam.visible else { return }
+                            let nx = (v.location.x - origin.x) / shown.width
+                            let ny = (v.location.y - origin.y) / shown.height // top-left, matches settings
+                            model.renderSettings.webcam.center = CGPoint(
+                                x: min(1, max(0, nx)), y: min(1, max(0, ny)))
+                        })
+
+                // Corner handles resize the bubble (they sit on top, so grabbing a corner resizes
+                // while a drag on the interior still moves it).
+                if model.renderSettings.webcam.visible {
+                    ForEach(0..<4, id: \.self) { i in
+                        WebcamResizeHandle(
+                            center: center,
+                            corner: CGPoint(x: i % 2 == 0 ? visualRect.minX : visualRect.maxX,
+                                            y: i < 2 ? visualRect.minY : visualRect.maxY),
+                            scale: scale, minDim: minDim
+                        ) { model.renderSettings.webcam.size = $0 }
+                    }
+                }
+            }
         }
+    }
+}
+
+/// A draggable corner dot that resizes the webcam bubble about its center. `apply` receives the new
+/// `webcam.size` (fraction of the canvas min dimension), clamped to a sane range.
+private struct WebcamResizeHandle: View {
+    let center: CGPoint
+    let corner: CGPoint
+    let scale: CGFloat
+    let minDim: CGFloat
+    let apply: (Double) -> Void
+
+    var body: some View {
+        Circle()
+            .fill(Color.white)
+            .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
+            .frame(width: 12, height: 12)
+            .frame(width: 24, height: 24)          // larger, easier-to-grab hit area
+            .contentShape(Rectangle())
+            .position(corner)
+            .gesture(DragGesture(minimumDistance: 1)
+                .onChanged { v in
+                    let dx = v.location.x - center.x
+                    let dy = v.location.y - center.y
+                    let sideView = max(abs(dx), abs(dy)) * 2      // square bubble, center-anchored
+                    apply(min(0.6, max(0.1, Double(sideView / scale / minDim))))
+                })
     }
 }
