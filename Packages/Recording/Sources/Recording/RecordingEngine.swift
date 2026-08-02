@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreGraphics
 import Foundation
 import ProjectStore
 
@@ -21,8 +22,26 @@ public final class RecordingEngine: ObservableObject {
     /// on it would be a tautology that always reads as "not yet active" until the very write
     /// that's supposed to be gated).
     private var capturesSystemAudio = false
+    /// Global desktop rect the screen video covers, persisted to the manifest for auto-zoom click
+    /// mapping. `nil` for window captures (the window can move mid-recording).
+    private var captureGlobalRect: CGRect?
 
     public init() {}
+
+    /// The global (top-left, points) rect a capture source covers. Matches `EventLogger`'s
+    /// global desktop coordinate space so recorded clicks map into the screen video.
+    static func globalCaptureRect(for source: RecordingConfiguration.Source) -> CGRect? {
+        switch source {
+        case .display(let id):
+            return CGDisplayBounds(id)
+        case .area(let displayID, let rect):
+            let b = CGDisplayBounds(displayID)
+            return CGRect(x: b.origin.x + rect.origin.x, y: b.origin.y + rect.origin.y,
+                          width: rect.width, height: rect.height)
+        case .window:
+            return nil
+        }
+    }
 
     public func start(configuration: RecordingConfiguration, projectURL: URL) async throws {
         guard case .idle = state else { return }
@@ -67,6 +86,7 @@ public final class RecordingEngine: ObservableObject {
         self.mic = mic
         self.events = events
         self.capturesSystemAudio = configuration.capturesSystemAudio
+        self.captureGlobalRect = Self.globalCaptureRect(for: configuration.source)
         self.webcamPreviewLayer = webcam?.previewLayer
         state = .recording(startedAt: Date())
 
@@ -105,6 +125,7 @@ public final class RecordingEngine: ObservableObject {
         if let p = screen.audioFirstPTS {
             pkg.manifest.systemAudio = TrackRef(filename: "system.caf", startOffset: p - epoch)
         }
+        pkg.manifest.captureRect = captureGlobalRect
         try? pkg.saveManifest()
         package = pkg
         events?.epoch = epoch

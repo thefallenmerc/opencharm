@@ -1,3 +1,4 @@
+import CoreGraphics
 import XCTest
 @testable import ProjectStore
 import RenderCore
@@ -38,5 +39,21 @@ final class ManifestTests: XCTestCase {
     func testUnknownVersionRejected() throws {
         let bad = #"{"schemaVersion": 999}"#.data(using: .utf8)!
         XCTAssertThrowsError(try ManifestMigrator.load(from: bad))
+    }
+
+    func testCaptureRectRoundTrips() throws {
+        var m = fullManifest()
+        m.captureRect = CGRect(x: 100, y: 50, width: 1920, height: 1080)
+        let back = try ManifestMigrator.load(from: try ManifestMigrator.save(m))
+        XCTAssertEqual(back.captureRect, CGRect(x: 100, y: 50, width: 1920, height: 1080))
+        XCTAssertEqual(m, back)
+    }
+
+    // A manifest written before captureRect existed (the v1 fixture) must still decode, with a nil
+    // captureRect — the additive optional field is backward compatible.
+    func testV1FixtureDecodesWithNilCaptureRect() throws {
+        let url = Bundle.module.url(forResource: "Fixtures/manifest-v1", withExtension: "json")!
+        let m = try ManifestMigrator.load(from: try Data(contentsOf: url))
+        XCTAssertNil(m.captureRect)
     }
 }

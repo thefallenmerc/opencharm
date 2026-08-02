@@ -1,4 +1,5 @@
 import AudioPipeline
+import CoreGraphics
 import Foundation
 import RenderCore
 
@@ -21,10 +22,16 @@ public struct ProjectManifest: Codable, Equatable, Sendable {
     public var systemAudio: TrackRef?
     public var renderSettings: RenderSettings
     public var audioSettings: AudioSettings
+    /// Global desktop rect (top-left origin, points) the screen video covers — used to map recorded
+    /// click coordinates into the screen's normalized space for auto-zoom. `nil` for window captures
+    /// and for projects recorded before this field existed. Optional/additive: old manifests decode
+    /// this as `nil`.
+    public var captureRect: CGRect?
 
     public init(schemaVersion: Int, createdAt: Date, screen: TrackRef,
                 webcam: TrackRef? = nil, mic: TrackRef? = nil, systemAudio: TrackRef? = nil,
-                renderSettings: RenderSettings, audioSettings: AudioSettings) {
+                renderSettings: RenderSettings, audioSettings: AudioSettings,
+                captureRect: CGRect? = nil) {
         self.schemaVersion = schemaVersion
         self.createdAt = createdAt
         self.screen = screen
@@ -33,5 +40,6 @@ public struct ProjectManifest: Codable, Equatable, Sendable {
         self.systemAudio = systemAudio
         self.renderSettings = renderSettings
         self.audioSettings = audioSettings
+        self.captureRect = captureRect
     }
 }
