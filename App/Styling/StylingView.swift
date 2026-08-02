@@ -28,5 +28,8 @@ struct StylingView: View {
                 Button("Export…") { model.showExport = true } // property added in Task 19
             }
         }
+        .sheet(isPresented: $model.showExport) {
+            ExportSheet(model: ExportModel(styling: model))
+        }
     }
 }

@@ -30,7 +30,10 @@ struct RecorderPanelView: View {
         .padding(14)
         .frame(width: 300)
         .task { await sources.refresh() }
-        .onAppear { model.openStylingWindow = { openWindow(id: "styling") } }
+        .onAppear {
+            model.openStylingWindow = { openWindow(id: "styling") }
+            model.checkRecoveryOnLaunchOnce()
+        }
     }
 
     var idleBody: some View {

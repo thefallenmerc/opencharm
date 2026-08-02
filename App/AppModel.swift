@@ -25,6 +25,8 @@ final class AppModel: ObservableObject {
 
     private var cancellables: Set<AnyCancellable> = []
     private var selfView: SelfViewWindow?
+    private var diskWatchdog: Timer?
+    private var didCheckRecovery = false
 
     init() {
         // `engine` is a nested ObservableObject: its own @Published changes only emit on
@@ -57,8 +59,26 @@ final class AppModel: ObservableObject {
         do {
             try FileManager.default.createDirectory(
                 at: ProjectLibrary.defaultDirectory, withIntermediateDirectories: true)
+            let free = (try? ProjectLibrary.defaultDirectory
+                .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+                .volumeAvailableCapacityForImportantUsage) ?? 0
+            guard free > 2_000_000_000 else { // 2 GB floor
+                lastError = "Not enough free disk space to record (need at least 2 GB)."
+                return
+            }
             try await engine.start(configuration: config,
                                    projectURL: ProjectLibrary.newProjectURL())
+            diskWatchdog = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, case .recording = self.engine.state else { return }
+                    let free = (try? ProjectLibrary.defaultDirectory
+                        .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+                        .volumeAvailableCapacityForImportantUsage) ?? .max
+                    if free < 1_000_000_000 {
+                        self.lastError = "Disk space is running low — stop the recording soon."
+                    }
+                }
+            }
         } catch {
             lastError = "Could not start recording: \(error.localizedDescription)"
         }
@@ -66,12 +86,41 @@ final class AppModel: ObservableObject {
 
     func stopRecording() async {
         selfView?.close(); selfView = nil
+        diskWatchdog?.invalidate(); diskWatchdog = nil
         do {
             finishedProject = try await engine.stop()
             NSApp.activate(ignoringOtherApps: true)
             openStylingWindow?()
         }
         catch { lastError = "Could not finish recording: \(error.localizedDescription)" }
+    }
+
+    func openProjectPanel() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = []          // .opencharm is a directory package
+        panel.directoryURL = ProjectLibrary.defaultDirectory
+        if panel.runModal() == .OK, let url = panel.url,
+           url.pathExtension == "opencharm",
+           let pkg = try? ProjectPackage.open(at: url) {
+            finishedProject = pkg
+            NSApp.activate(ignoringOtherApps: true)
+            openStylingWindow?()
+        }
+    }
+
+    func checkRecoveryOnLaunch() {
+        if let pkg = RecoveryPrompt.checkOnLaunch() {
+            finishedProject = pkg
+            openStylingWindow?()
+        }
+    }
+
+    func checkRecoveryOnLaunchOnce() {
+        guard !didCheckRecovery else { return }
+        didCheckRecovery = true
+        checkRecoveryOnLaunch()
     }
 
     func beginAreaSelection() {

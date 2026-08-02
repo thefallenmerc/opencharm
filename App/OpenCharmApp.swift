@@ -18,6 +18,12 @@ struct OpenCharmApp: App {
             StylingHost(model: model)
         }
         .defaultSize(width: 1100, height: 700)
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("Open Project…") { model.openProjectPanel() }
+                    .keyboardShortcut("o")
+            }
+        }
     }
 }
 
