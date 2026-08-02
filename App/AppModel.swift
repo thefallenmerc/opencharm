@@ -26,16 +26,10 @@ final class AppModel: ObservableObject {
     @Published var isCountingDown = false
     /// Window numbers of our overlay windows, excluded from capture (Task 15 populates).
     var overlayWindowNumbers: [Int] = []
-    /// Set when recording finishes; Task 18's styling window observes this.
-    @Published var finishedProject: ProjectPackage?
-    /// Set by the menu-bar view via `@Environment(\.openWindow)`; opens the Studio window.
-    var openStylingWindow: (() -> Void)? {
-        didSet { openPendingStylingWindowIfNeeded() }
-    }
-    /// Set when something wants the Studio window opened but `openStylingWindow` isn't installed
-    /// yet — namely recovery-on-launch firing from `AppDelegate`, ahead of `RecorderPanelView`
-    /// ever appearing. Serviced automatically the moment `openStylingWindow` is assigned.
-    private var pendingStylingOpen = false
+
+    /// AppKit-owned Studio window. The single vehicle for showing a finished/opened
+    /// project — stop-flow, launch recovery, and Open Project all go through `openStudio`.
+    private lazy var studio = StudioWindowController()
 
     private var cancellables: Set<AnyCancellable> = []
     private var selfView: SelfViewWindow?
@@ -58,6 +52,12 @@ final class AppModel: ObservableObject {
     /// RecorderPanelView switching out of the onboarding branch once everything's granted.
     func permissionsChanged() {
         objectWillChange.send()
+    }
+
+    /// Opens (or brings forward) the Studio window showing `pkg`. The single entry
+    /// point for stop-flow, launch recovery, and Open Project.
+    func openStudio(_ pkg: ProjectPackage) {
+        studio.show(package: pkg)
     }
 
     var missingPermissions: [PermissionKind] {
@@ -103,9 +103,8 @@ final class AppModel: ObservableObject {
         selfView?.close(); selfView = nil
         diskWatchdog?.invalidate(); diskWatchdog = nil
         do {
-            finishedProject = try await engine.stop()
-            NSApp.activate(ignoringOtherApps: true)
-            openStylingWindow?()
+            let pkg = try await engine.stop()
+            openStudio(pkg)
         }
         catch { lastError = "Could not finish recording: \(error.localizedDescription)" }
     }
@@ -125,9 +124,7 @@ final class AppModel: ObservableObject {
         }
         do {
             let pkg = try ProjectPackage.open(at: url)
-            finishedProject = pkg
-            NSApp.activate(ignoringOtherApps: true)
-            openStylingWindow?()
+            openStudio(pkg)
         } catch {
             presentOpenProjectError("Couldn't open project: \(error.localizedDescription)")
         }
@@ -148,29 +145,13 @@ final class AppModel: ObservableObject {
 
     func checkRecoveryOnLaunch() {
         guard let pkg = RecoveryPrompt.checkOnLaunch() else { return }
-        finishedProject = pkg
-        if let openStylingWindow {
-            openStylingWindow()
-        } else {
-            // `RecorderPanelView` hasn't appeared yet (this fired from `AppDelegate` at launch,
-            // before the user ever clicked the menu bar icon) — defer until it does.
-            pendingStylingOpen = true
-        }
+        openStudio(pkg)
     }
 
     func checkRecoveryOnLaunchOnce() {
         guard !didCheckRecovery else { return }
         didCheckRecovery = true
         checkRecoveryOnLaunch()
-    }
-
-    /// Services a styling-window-open request that arrived before `openStylingWindow` existed —
-    /// see `checkRecoveryOnLaunch()`. Called automatically from `openStylingWindow`'s `didSet`,
-    /// so `RecorderPanelView.onAppear` needs no extra wiring beyond the existing assignment.
-    private func openPendingStylingWindowIfNeeded() {
-        guard pendingStylingOpen else { return }
-        pendingStylingOpen = false
-        openStylingWindow?()
     }
 
     func beginAreaSelection() {
