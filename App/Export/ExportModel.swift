@@ -42,11 +42,13 @@ final class ExportModel: ObservableObject {
                                                    cacheDir: cacheDir, audioSettings: audio,
                                                    forPreview: false)
                 }.value
+                let clicks = styling.autoZoomClicks
                 let exporter = ProjectExporter(
                     timeline: timeline,
                     settings: settings,
                     sourceCanvasSize: canvas,
-                    backgroundImage: bg)
+                    backgroundImage: bg,
+                    clicks: clicks)
                 self.exporter = exporter
                 try await exporter.export(
                     ExportRequest(outputURL: url, codec: codec, resolution: resolution)) { p in

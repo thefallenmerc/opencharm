@@ -16,6 +16,9 @@ final class StylingModel: ObservableObject {
     let player = AVPlayer()
     private(set) var package: ProjectPackage
     private(set) var sourceCanvasSize = CGSize(width: 1920, height: 1080)
+    /// Recorded clicks mapped to normalized screen space, loaded once. Drives auto-zoom in both
+    /// preview and export. Empty when the project has no capture rect (e.g. window captures).
+    private(set) var autoZoomClicks: [ClickEvent] = []
     private var videoDebounce: Task<Void, Never>?
     private var audioDebounce: Task<Void, Never>?
     private var saveDebounce: Task<Void, Never>?
@@ -28,6 +31,7 @@ final class StylingModel: ObservableObject {
     }
 
     private func initialLoad() async {
+        autoZoomClicks = ClickTrack.load(package: package)
         if let track = try? await AVURLAsset(url: package.screenURL)
             .loadTracks(withMediaType: .video).first,
            let size = try? await track.load(.naturalSize) {
@@ -110,6 +114,7 @@ final class StylingModel: ObservableObject {
             let settings = renderSettings
             let canvas = sourceCanvasSize
             let bg = resolvedBackgroundImage()
+            let clicks = autoZoomClicks
             let timeline = try await Task.detached {
                 try Self.buildTimeline(manifest: manifest, packageURL: packageURL,
                                        cacheDir: cacheDir, audioSettings: audio,
@@ -120,7 +125,7 @@ final class StylingModel: ObservableObject {
             guard !Task.isCancelled else { return }
             let built = try await ProjectCompositionBuilder.build(
                 timeline: timeline, settings: settings, canvasSize: canvas,
-                backgroundImage: bg)
+                backgroundImage: bg, clicks: clicks)
             guard !Task.isCancelled else { return }
             let item = AVPlayerItem(asset: built.composition)
             item.videoComposition = built.videoComposition
@@ -153,6 +158,7 @@ final class StylingModel: ObservableObject {
                 let settings = renderSettings
                 let canvas = sourceCanvasSize
                 let bg = resolvedBackgroundImage()
+                let clicks = autoZoomClicks
                 let timeline = try await Task.detached {
                     try Self.buildTimeline(manifest: manifest, packageURL: packageURL,
                                            cacheDir: cacheDir, audioSettings: audio,
@@ -161,7 +167,7 @@ final class StylingModel: ObservableObject {
                 guard !Task.isCancelled else { return }
                 let built = try await ProjectCompositionBuilder.build(
                     timeline: timeline, settings: settings, canvasSize: canvas,
-                    backgroundImage: bg)
+                    backgroundImage: bg, clicks: clicks)
                 guard !Task.isCancelled else { return }
                 item.videoComposition = built.videoComposition
                 if player.rate == 0 { // refresh the paused frame

@@ -24,6 +24,17 @@ struct InspectorView: View {
                 slider("Corner radius", $model.renderSettings.cornerRadiusFraction, 0...0.2)
                 slider("Shadow", $model.renderSettings.shadow.opacity, 0...1)
             }
+            Section("Auto Zoom") {
+                Toggle("Zoom in on clicks", isOn: autoZoomEnabled)
+                if autoZoomEnabled.wrappedValue {
+                    slider("Zoom level", autoZoomLevel, 1.5...3)
+                    slider("Speed", autoZoomSpeed, 0...1)
+                    if model.autoZoomClicks.isEmpty {
+                        Text("No click data for this recording — window recordings aren't supported.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
             Section("Webcam") {
                 Toggle("Show webcam", isOn: $model.renderSettings.webcam.visible)
                 slider("Size", $model.renderSettings.webcam.size, 0.1...0.5)
@@ -50,6 +61,22 @@ struct InspectorView: View {
 
     func slider(_ label: String, _ value: Binding<Double>, _ range: ClosedRange<Double>) -> some View {
         LabeledContent(label) { Slider(value: value, in: range) }
+    }
+
+    var autoZoomEnabled: Binding<Bool> {
+        Binding { model.renderSettings.autoZoom?.enabled ?? false }
+        set: { var z = model.renderSettings.autoZoom ?? .default; z.enabled = $0
+               model.renderSettings.autoZoom = z }
+    }
+    var autoZoomLevel: Binding<Double> {
+        Binding { model.renderSettings.autoZoom?.level ?? AutoZoomSettings.default.level }
+        set: { var z = model.renderSettings.autoZoom ?? .default; z.level = $0
+               model.renderSettings.autoZoom = z }
+    }
+    var autoZoomSpeed: Binding<Double> {
+        Binding { model.renderSettings.autoZoom?.speed ?? AutoZoomSettings.default.speed }
+        set: { var z = model.renderSettings.autoZoom ?? .default; z.speed = $0
+               model.renderSettings.autoZoom = z }
     }
 
     var backgroundKind: Binding<String> {
