@@ -7,8 +7,9 @@ Capture cannot run on CI — walk this list on real hardware.
    pane; after granting, sources start normally.
 2. Launch: dock + live webcam bubble appear with no clicks. Camera/Mic tiles show
    the selected device name (ellipsized). Camera toggle off → bubble hides AND camera
-   light turns off; on → live again. Right-click Camera/Mic to switch devices. The
-   Settings gear opens frame rate / Open Project / Quit.
+   light turns off; on → live again. The ▾ caret on Camera/Mic opens a device picker
+   (switching the camera updates the live bubble). The Settings gear opens frame rate /
+   Open Project / Quit.
 3. Display + camera + mic + system audio, 60 fps, 10 s with music and speech:
    click Display → countdown → dock morphs to a compact pill (red dot + MM:SS timer);
    clicking the red dot stops, dragging the timer moves the pill; tracks exist, styled

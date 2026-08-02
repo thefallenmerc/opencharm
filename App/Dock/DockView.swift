@@ -118,11 +118,12 @@ struct DockView: View {
                     model.startAreaRecording()
                 }
                 divider
-                toggleButton(on: "video", off: "video.slash", label: cameraLabel,
-                             isOn: sources.cameraEnabled) {
-                    model.setCameraEnabled(!sources.cameraEnabled)
-                }
-                .contextMenu {
+                deviceToggle(on: "video", off: "video.slash", label: cameraLabel,
+                             isOn: sources.cameraEnabled,
+                             toggle: { model.setCameraEnabled(!sources.cameraEnabled) }) {
+                    if sources.cameras.isEmpty {
+                        Button("No cameras found") {}.disabled(true)
+                    }
                     ForEach(sources.cameras, id: \.uniqueID) { d in
                         Button {
                             sources.cameraID = d.uniqueID
@@ -134,11 +135,12 @@ struct DockView: View {
                         }
                     }
                 }
-                toggleButton(on: "mic", off: "mic.slash", label: micLabel,
-                             isOn: sources.micEnabled) {
-                    model.setMicEnabled(!sources.micEnabled)
-                }
-                .contextMenu {
+                deviceToggle(on: "mic", off: "mic.slash", label: micLabel,
+                             isOn: sources.micEnabled,
+                             toggle: { model.setMicEnabled(!sources.micEnabled) }) {
+                    if sources.mics.isEmpty {
+                        Button("No microphones found") {}.disabled(true)
+                    }
                     ForEach(sources.mics, id: \.uniqueID) { d in
                         Button {
                             sources.micID = d.uniqueID
@@ -262,6 +264,33 @@ struct DockView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    /// A source tile whose body toggles on/off (same footprint as `toggleButton`) with a small
+    /// ▾ caret in the corner that opens a device picker. The caret is a separate hit target laid
+    /// over the toggle Button, so a corner tap opens the menu while a tap anywhere else toggles.
+    private func deviceToggle<Devices: View>(
+        on: String, off: String, label: String, isOn: Bool,
+        toggle: @escaping () -> Void,
+        @ViewBuilder devices: () -> Devices
+    ) -> some View {
+        ZStack(alignment: .topTrailing) {
+            toggleButton(on: on, off: off, label: label, isOn: isOn, action: toggle)
+            Menu {
+                devices()
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .frame(width: 16, height: 16)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .padding(2)
+            .help("Choose device")
+        }
     }
 
     private var displayPicker: some View {
