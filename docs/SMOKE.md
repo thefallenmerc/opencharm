@@ -45,3 +45,9 @@ Capture cannot run on CI — walk this list on real hardware.
     kill.
 11. Unplug an external webcam mid-recording: recording continues; stop succeeds;
     idle preview resumes on the remaining camera (or hides bubble if none).
+12. Save project: record → tweak a zoom → close the Studio → a "Save this project?"
+    prompt appears → Save… → pick `~/Desktop/Demo.charmproj` → the file is written and
+    the window closes. Menu bar → Open Project… → pick that `.charmproj` → Studio
+    restores the project (zooms/trim/webcam/audio). Close it unedited → no prompt.
+    Edit again → ⌘S updates the same file (no panel). Quit with an unsaved recording →
+    prompt (Cancel keeps the app running).

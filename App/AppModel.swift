@@ -188,13 +188,23 @@ final class AppModel: ObservableObject {
         // .OK with no URL shouldn't happen, but if it did, treat it like Cancel rather than
         // reporting a spurious error.
         guard panel.runModal() == .OK, let url = panel.url else { return } // user cancelled
-        guard url.pathExtension == "opencharm" else {
-            presentOpenProjectError("Not an OpenCharm project.")
-            return
-        }
         do {
-            let pkg = try ProjectPackage.open(at: url)
-            openStudio(pkg)
+            let pkg: ProjectPackage
+            var archive: URL?
+            switch url.pathExtension {
+            case "charmproj":
+                // Unpack the portable archive into the library, then open that working copy.
+                let working = try ProjectArchive.unpack(
+                    archiveURL: url, into: ProjectLibrary.defaultDirectory)
+                pkg = try ProjectPackage.open(at: working)
+                archive = url
+            case "opencharm":
+                pkg = try ProjectPackage.open(at: url)
+            default:
+                presentOpenProjectError("Not an OpenCharm project.")
+                return
+            }
+            openStudio(pkg, savedArchive: archive)
         } catch {
             presentOpenProjectError("Couldn't open project: \(error.localizedDescription)")
         }
