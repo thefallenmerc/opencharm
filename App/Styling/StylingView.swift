@@ -5,12 +5,19 @@ struct StylingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 8) {
+                if model.hasUnsavedChanges {
+                    Text("Edited").font(.caption).foregroundStyle(.secondary)
+                }
                 Spacer()
+                Button("Save") { Task { await model.saveProject() } }
+                    .keyboardShortcut("s")
+                Button("Save As…") { Task { await model.saveProjectAs() } }
                 Button("Export…") { model.showExport = true } // property added in Task 19
                     .keyboardShortcut("e")
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
+            .disabled(model.isSaving)
             Divider()
             HStack(spacing: 0) {
                 InspectorView(model: model)
@@ -38,6 +45,13 @@ struct StylingView: View {
         } message: { Text(model.errorMessage ?? "") }
         .sheet(isPresented: $model.showExport) {
             ExportSheet(model: ExportModel(styling: model))
+        }
+        .overlay {
+            if model.isSaving {
+                ProgressView("Saving…")
+                    .padding(16)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+            }
         }
     }
 }

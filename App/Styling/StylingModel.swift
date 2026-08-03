@@ -1,9 +1,11 @@
+import AppKit
 import AudioPipeline
 import AVFoundation
 import CoreImage
 import ProjectStore
 import RenderCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 final class StylingModel: ObservableObject {
@@ -16,6 +18,16 @@ final class StylingModel: ObservableObject {
     @Published var currentTime: Double = 0
     @Published var duration: Double = 0
     @Published var isPlaying = false
+    /// True once an edit has been made since the last save. Combined with `savedArchiveURL` to decide
+    /// whether closing should prompt to save a portable `.charmproj`.
+    @Published var hasUnsavedChanges = false
+    @Published var isSaving = false
+    /// The `.charmproj` this project was last saved to / opened from (nil = never saved to a chosen
+    /// location, e.g. a fresh recording).
+    @Published private(set) var savedArchiveURL: URL?
+
+    /// Whether closing/quitting should prompt to save: unsaved edits, or never saved to a location.
+    var needsSavePrompt: Bool { savedArchiveURL == nil || hasUnsavedChanges }
 
     let player = AVPlayer()
     private(set) var package: ProjectPackage
@@ -28,9 +40,11 @@ final class StylingModel: ObservableObject {
     private var audioDebounce: Task<Void, Never>?
     private var saveDebounce: Task<Void, Never>?
     private var timeObserver: Any?
+    private var isLoaded = false
 
-    init(package: ProjectPackage) {
+    init(package: ProjectPackage, savedArchiveURL: URL? = nil) {
         self.package = package
+        self.savedArchiveURL = savedArchiveURL
         self.renderSettings = package.manifest.renderSettings
         self.audioSettings = package.manifest.audioSettings
         timeObserver = player.addPeriodicTimeObserver(
@@ -62,6 +76,7 @@ final class StylingModel: ObservableObject {
             sourceCanvasSize = size
         }
         await rebuildComposition()
+        isLoaded = true // edits after this point mark the project dirty (seeding above must not)
     }
 
     /// Raw or cache-processed audio depending on toggles. forPreview=false is identical today;
@@ -213,6 +228,46 @@ final class StylingModel: ObservableObject {
         if player.timeControlStatus == .playing { player.pause() } else { player.play() }
     }
 
+    // MARK: Save as portable .charmproj
+
+    var projectName: String { (savedArchiveURL ?? package.url).deletingPathExtension().lastPathComponent }
+
+    /// Saves to the existing archive location if any, otherwise prompts for one. Returns whether a
+    /// file was written (false if the user cancelled the save panel or it failed).
+    @discardableResult
+    func saveProject() async -> Bool {
+        if let url = savedArchiveURL { return await save(to: url) }
+        return await saveProjectAs()
+    }
+
+    @discardableResult
+    func saveProjectAs() async -> Bool {
+        let panel = NSSavePanel()
+        if let type = UTType(filenameExtension: "charmproj") { panel.allowedContentTypes = [type] }
+        panel.nameFieldStringValue = projectName + ".charmproj"
+        guard panel.runModal() == .OK, let url = panel.url else { return false }
+        return await save(to: url)
+    }
+
+    private func save(to dest: URL) async -> Bool {
+        isSaving = true
+        defer { isSaving = false }
+        // Flush the latest settings into the working-copy manifest so the archive is current.
+        package.manifest.renderSettings = renderSettings
+        package.manifest.audioSettings = audioSettings
+        try? package.saveManifest()
+        let src = package.url
+        do {
+            try await Task.detached { try ProjectArchive.write(packageURL: src, to: dest) }.value
+            savedArchiveURL = dest
+            hasUnsavedChanges = false
+            return true
+        } catch {
+            errorMessage = "Couldn't save project: \(error.localizedDescription)"
+            return false
+        }
+    }
+
     /// Bounds preview playback to the trimmed range (stops at trimEnd). Export applies the real cut.
     func applyTrim() {
         guard let item = player.currentItem else { return }
@@ -304,11 +359,13 @@ final class StylingModel: ObservableObject {
     }
 
     private func renderSettingsChanged() {
+        if isLoaded { hasUnsavedChanges = true }
         rebuildVideoComposition()
         persist()
     }
 
     private func audioSettingsChanged() {
+        if isLoaded { hasUnsavedChanges = true }
         audioDebounce?.cancel()
         audioDebounce = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(150))
