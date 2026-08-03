@@ -27,7 +27,7 @@ public final class Compositor {
         // Shrink the webcam bubble slightly while zoomed in, in step with the zoom envelope, so it
         // stays unobtrusive over the magnified content (matches the reference).
         if zoom.progress > 0 {
-            let f = CGFloat(1 - 0.15 * min(max(zoom.progress, 0), 1)) // up to 15% smaller
+            let f = CGFloat(1 - 0.5 * min(max(zoom.progress, 0), 1)) // half size at full zoom
             layout.webcamRect = shrink(layout.webcamRect, by: f)
             layout.webcamCornerRadius *= f
         }

@@ -44,6 +44,32 @@ public struct ZoomSegment: Equatable, Sendable {
     }
 }
 
+/// A persisted, user-editable zoom on the timeline. Auto-generated ones are seeded from clicks
+/// (`manual == false`); anything the user creates or edits is `manual == true`, which protects it
+/// from click-based regeneration. Maps 1:1 to a `ZoomSegment` for rendering.
+public struct ZoomSpec: Codable, Equatable, Sendable, Identifiable {
+    public var id: String
+    public var start: Double
+    public var end: Double
+    public var easeIn: Double
+    public var easeOut: Double
+    public var focus: CGPoint
+    public var scale: Double
+    public var manual: Bool
+
+    public init(id: String, start: Double, end: Double, easeIn: Double, easeOut: Double,
+                focus: CGPoint, scale: Double, manual: Bool) {
+        self.id = id; self.start = start; self.end = end
+        self.easeIn = easeIn; self.easeOut = easeOut
+        self.focus = focus; self.scale = scale; self.manual = manual
+    }
+
+    public var segment: ZoomSegment {
+        ZoomSegment(start: start, end: end, easeIn: easeIn, easeOut: easeOut,
+                    focus: focus, scale: scale)
+    }
+}
+
 /// The evaluated zoom for one instant: `scale` (1 = no zoom) about `focus` (normalized, top-left).
 /// `progress` is the eased 0…1 envelope (0 = out, 1 = fully zoomed) — used to shrink the webcam in
 /// step with the zoom.

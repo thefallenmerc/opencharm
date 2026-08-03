@@ -54,8 +54,10 @@ public enum ProjectCompositionBuilder {
         videoComposition.customVideoCompositorClass = CharmVideoCompositor.self
         videoComposition.renderSize = canvasSize
         videoComposition.frameDuration = CMTime(value: 1, timescale: 60)
-        let zoomSegments = AutoZoom.segments(clicks: clicks,
-                                             settings: settings.autoZoom ?? .default)
+        // Prefer the materialized, user-editable timeline zooms; fall back to computing from clicks
+        // for callers that haven't seeded `settings.zooms` yet.
+        let zoomSegments = settings.zooms.map { $0.map(\.segment) }
+            ?? AutoZoom.segments(clicks: clicks, settings: settings.autoZoom ?? .default)
         videoComposition.instructions = [CharmInstruction(
             timeRange: CMTimeRange(start: .zero, duration: composition.duration),
             screenTrackID: screenID, webcamTrackID: webcamID,

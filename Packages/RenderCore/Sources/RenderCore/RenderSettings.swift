@@ -48,16 +48,26 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     /// Auto zoom-on-click. Optional/additive: manifests written before this feature decode `nil`,
     /// which consumers treat as `AutoZoomSettings.default` (disabled).
     public var autoZoom: AutoZoomSettings?
+    /// The materialized, editable timeline zooms. `nil` = not yet seeded (the Studio seeds it from
+    /// clicks on first open); once set, it is the source of truth for rendering. Additive/optional.
+    public var zooms: [ZoomSpec]?
+    /// Trim in/out points in composition seconds. `nil` = no trim on that side.
+    public var trimStart: Double?
+    public var trimEnd: Double?
 
     public init(background: Background, paddingFraction: Double, cornerRadiusFraction: Double,
                 shadow: ShadowSettings, webcam: WebcamSettings,
-                autoZoom: AutoZoomSettings? = nil) {
+                autoZoom: AutoZoomSettings? = nil,
+                zooms: [ZoomSpec]? = nil, trimStart: Double? = nil, trimEnd: Double? = nil) {
         self.background = background
         self.paddingFraction = paddingFraction
         self.cornerRadiusFraction = cornerRadiusFraction
         self.shadow = shadow
         self.webcam = webcam
         self.autoZoom = autoZoom
+        self.zooms = zooms
+        self.trimStart = trimStart
+        self.trimEnd = trimEnd
     }
 
     public static let `default` = RenderSettings(
