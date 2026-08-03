@@ -25,4 +25,23 @@ enum ClickTrack {
         }
         return clicks
     }
+
+    /// All pointer samples (moves + clicks) in normalized screen space, time-ordered — used to focus
+    /// a manually-created zoom on the cursor location over its span.
+    static func loadCursor(package: ProjectPackage) -> [(time: Double, point: CGPoint)] {
+        guard let rect = package.manifest.captureRect, rect.width > 0, rect.height > 0,
+              let data = try? Data(contentsOf: package.eventsURL),
+              let text = String(data: data, encoding: .utf8) else { return [] }
+        let decoder = JSONDecoder()
+        var out: [(time: Double, point: CGPoint)] = []
+        for line in text.split(separator: "\n") {
+            guard let lineData = line.data(using: .utf8),
+                  let e = try? decoder.decode(LoggedEvent.self, from: lineData) else { continue }
+            let nx = (e.x - rect.minX) / rect.width
+            let ny = (e.y - rect.minY) / rect.height
+            guard (0...1).contains(nx), (0...1).contains(ny) else { continue }
+            out.append((e.t, CGPoint(x: nx, y: ny)))
+        }
+        return out
+    }
 }

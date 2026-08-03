@@ -29,10 +29,13 @@ struct InspectorView: View {
                 if autoZoomEnabled.wrappedValue {
                     slider("Zoom level", autoZoomLevel, 1.5...3)
                     slider("Speed", autoZoomSpeed, 0...1)
+                    Button("Regenerate from clicks") { model.regenerateAutoZooms() }
                     if model.autoZoomClicks.isEmpty {
                         Text("No click data for this recording — window recordings aren't supported.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                    Text("Edit or delete zooms on the timeline below.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             Section("Webcam") {
@@ -66,17 +69,17 @@ struct InspectorView: View {
     var autoZoomEnabled: Binding<Bool> {
         Binding { model.renderSettings.autoZoom?.enabled ?? AutoZoomSettings.default.enabled }
         set: { var z = model.renderSettings.autoZoom ?? .default; z.enabled = $0
-               model.renderSettings.autoZoom = z }
+               model.renderSettings.autoZoom = z; model.regenerateAutoZooms() }
     }
     var autoZoomLevel: Binding<Double> {
         Binding { model.renderSettings.autoZoom?.level ?? AutoZoomSettings.default.level }
         set: { var z = model.renderSettings.autoZoom ?? .default; z.level = $0
-               model.renderSettings.autoZoom = z }
+               model.renderSettings.autoZoom = z; model.regenerateAutoZooms() }
     }
     var autoZoomSpeed: Binding<Double> {
         Binding { model.renderSettings.autoZoom?.speed ?? AutoZoomSettings.default.speed }
         set: { var z = model.renderSettings.autoZoom ?? .default; z.speed = $0
-               model.renderSettings.autoZoom = z }
+               model.renderSettings.autoZoom = z; model.regenerateAutoZooms() }
     }
 
     var backgroundKind: Binding<String> {
