@@ -18,6 +18,8 @@ final class AppModel: ObservableObject {
     let sources = SourcePickerModel()
     /// Owns the live idle camera preview and the one self-view bubble (idle + recording).
     let cameraPreview = CameraPreviewController()
+    /// Live microphone input level (0…1) for the dock's mic meter.
+    let micMeter = MicMeter()
 
     @Published var lastError: String?
     /// True from the moment a countdown is requested until `recordWithBubble()` finishes
@@ -44,6 +46,22 @@ final class AppModel: ObservableObject {
         // re-render when `engine.state` changes. Forward the signal so they do.
         engine.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
+        // Keep the camera/mic lists live as devices are plugged in or removed, and re-point the
+        // idle preview if the selected camera vanished or a better one appeared. Debounced because
+        // a single plug event can emit several notifications.
+        NotificationCenter.default.publisher(for: AVCaptureDevice.wasConnectedNotification)
+            .merge(with: NotificationCenter.default.publisher(for: AVCaptureDevice.wasDisconnectedNotification))
+            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.sources.refreshDevices()
+                    self.refreshIdlePreview()
+                    self.refreshMicMeter()
+                }
+            }
             .store(in: &cancellables)
     }
 
@@ -77,6 +95,7 @@ final class AppModel: ObservableObject {
                 _ = await PermissionsService.request(.camera)
             }
             refreshIdlePreview()
+            refreshMicMeter()
         }
     }
 
@@ -91,6 +110,17 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Starts/stops the idle mic meter to match the mic toggle, permission, and idle state.
+    func refreshMicMeter() {
+        guard case .idle = engine.state else { micMeter.stop(); return } // recording owns the mic
+        if sources.micEnabled, sources.micID != nil,
+           PermissionsService.status(.microphone) == .granted {
+            micMeter.start(deviceID: sources.micID)
+        } else {
+            micMeter.stop()
+        }
+    }
+
     func setCameraEnabled(_ on: Bool) {
         sources.cameraEnabled = on
         refreshIdlePreview()
@@ -98,6 +128,7 @@ final class AppModel: ObservableObject {
 
     func setMicEnabled(_ on: Bool) {
         sources.micEnabled = on
+        refreshMicMeter()
     }
 
     func startRecording() async {
@@ -140,6 +171,7 @@ final class AppModel: ObservableObject {
         }
         catch { lastError = "Could not finish recording: \(error.localizedDescription)" }
         refreshIdlePreview() // resume the live idle preview whether stop succeeded or failed
+        refreshMicMeter()
     }
 
     func openProjectPanel() {
@@ -238,6 +270,7 @@ final class AppModel: ObservableObject {
         // stop first so the recording session can open the camera device.
         let cameraActive = sources.cameraEnabled && sources.cameraID != nil
         cameraPreview.stopIdleSession()
+        micMeter.stop() // the engine is about to take the mic device
         if cameraActive {
             cameraPreview.ensureBubble()
         } else {
@@ -248,6 +281,7 @@ final class AppModel: ObservableObject {
         guard case .recording = engine.state else {
             overlayWindowNumbers = []
             refreshIdlePreview() // resume live preview after a failed start
+            refreshMicMeter()
             return
         }
         if cameraActive, let layer = engine.webcamPreviewLayer {

@@ -135,22 +135,7 @@ struct DockView: View {
                         }
                     }
                 }
-                deviceToggle(on: "mic", off: "mic.slash", label: micLabel,
-                             isOn: sources.micEnabled,
-                             toggle: { model.setMicEnabled(!sources.micEnabled) }) {
-                    if sources.mics.isEmpty {
-                        Button("No microphones found") {}.disabled(true)
-                    }
-                    ForEach(sources.mics, id: \.uniqueID) { d in
-                        Button {
-                            sources.micID = d.uniqueID
-                        } label: {
-                            if d.uniqueID == sources.micID {
-                                Label(d.localizedName, systemImage: "checkmark")
-                            } else { Text(d.localizedName) }
-                        }
-                    }
-                }
+                micTile
                 toggleButton(on: "speaker.wave.2", off: "speaker.slash",
                              label: "System Audio", isOn: sources.systemAudio) {
                     sources.systemAudio.toggle()
@@ -276,20 +261,60 @@ struct DockView: View {
     ) -> some View {
         ZStack(alignment: .topTrailing) {
             toggleButton(on: on, off: off, label: label, isOn: isOn, action: toggle)
-            Menu {
-                devices()
+            caretMenu(devices: devices)
+        }
+    }
+
+    /// The small ▾ corner control that opens a device picker, shared by the camera/mic tiles.
+    private func caretMenu<Devices: View>(@ViewBuilder devices: () -> Devices) -> some View {
+        Menu {
+            devices()
+        } label: {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.6))
+                .frame(width: 16, height: 16)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .padding(2)
+        .help("Choose device")
+    }
+
+    /// The mic tile: same toggle + ▾ device picker as the others, but the icon fills green with the
+    /// live input level so it's visibly "listening".
+    private var micTile: some View {
+        ZStack(alignment: .topTrailing) {
+            Button {
+                model.setMicEnabled(!sources.micEnabled)
             } label: {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .frame(width: 16, height: 16)
-                    .contentShape(Rectangle())
+                VStack(spacing: 6) {
+                    MicLevelIcon(meter: model.micMeter, isOn: sources.micEnabled)
+                    Text(micLabel).font(.system(size: 13))
+                        .lineLimit(1).truncationMode(.tail)
+                        .foregroundStyle(sources.micEnabled ? .white : .white.opacity(0.45))
+                }
+                .frame(width: 86, height: 58)
+                .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .padding(2)
-            .help("Choose device")
+            .buttonStyle(.plain)
+            caretMenu {
+                if sources.mics.isEmpty {
+                    Button("No microphones found") {}.disabled(true)
+                }
+                ForEach(sources.mics, id: \.uniqueID) { d in
+                    Button {
+                        sources.micID = d.uniqueID
+                        model.refreshMicMeter()
+                    } label: {
+                        if d.uniqueID == sources.micID {
+                            Label(d.localizedName, systemImage: "checkmark")
+                        } else { Text(d.localizedName) }
+                    }
+                }
+            }
         }
     }
 
@@ -319,5 +344,35 @@ struct DockView: View {
             .padding(12)
         }
         .frame(width: 320, height: 260)
+    }
+}
+
+/// A mic glyph that fills green from the bottom with the live input level — the dock's
+/// "we're listening" indicator. Shows the slashed mic when the source is off.
+private struct MicLevelIcon: View {
+    @ObservedObject var meter: MicMeter
+    let isOn: Bool
+
+    var body: some View {
+        Group {
+            if isOn {
+                ZStack {
+                    Image(systemName: "mic").foregroundStyle(.white.opacity(0.55))
+                    Image(systemName: "mic.fill")
+                        .foregroundStyle(.green)
+                        .mask {
+                            GeometryReader { geo in
+                                Rectangle()
+                                    .frame(height: geo.size.height * CGFloat(min(max(meter.level, 0), 1)))
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                            }
+                        }
+                }
+                .animation(.linear(duration: 0.08), value: meter.level)
+            } else {
+                Image(systemName: "mic.slash").foregroundStyle(.white.opacity(0.45))
+            }
+        }
+        .font(.system(size: 22))
     }
 }

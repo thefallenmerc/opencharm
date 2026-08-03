@@ -24,14 +24,25 @@ final class SourcePickerModel: ObservableObject {
     @Published var cameraEnabled = true
     @Published var micEnabled = true
 
-    func refresh() async {
+    /// Re-enumerates cameras/mics (cheap, synchronous) and keeps the selection valid: an existing
+    /// selection is preserved if the device is still present, otherwise it falls back to the first
+    /// available (or nil). Called at launch and whenever a device is plugged in/out.
+    func refreshDevices() {
         cameras = AVCaptureDevice.DiscoverySession(
             deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera],
             mediaType: .video, position: .unspecified).devices
         mics = AVCaptureDevice.DiscoverySession(
             deviceTypes: [.microphone], mediaType: .audio, position: .unspecified).devices
-        if cameraID == nil { cameraID = cameras.first?.uniqueID }
-        if micID == nil { micID = mics.first?.uniqueID }
+        if cameraID == nil || !cameras.contains(where: { $0.uniqueID == cameraID }) {
+            cameraID = cameras.first?.uniqueID
+        }
+        if micID == nil || !mics.contains(where: { $0.uniqueID == micID }) {
+            micID = mics.first?.uniqueID
+        }
+    }
+
+    func refresh() async {
+        refreshDevices()
         if let content = try? await SCShareableContent.excludingDesktopWindows(
             false, onScreenWindowsOnly: true) {
             displays = content.displays
