@@ -15,7 +15,7 @@ final class AutoZoomTests: XCTestCase {
         XCTAssertTrue(AutoZoom.segments(clicks: [], settings: on).isEmpty)
     }
 
-    func testNearbyClicksClusterIntoOneSegmentAtCentroid() {
+    func testNearbyClicksStayOneStaticFocus() {
         let clicks = [
             ClickEvent(time: 3.0, point: .init(x: 0.30, y: 0.40)),
             ClickEvent(time: 3.3, point: .init(x: 0.34, y: 0.44)),
@@ -23,13 +23,31 @@ final class AutoZoomTests: XCTestCase {
         ]
         let segs = AutoZoom.segments(clicks: clicks, settings: on)
         XCTAssertEqual(segs.count, 1)
-        XCTAssertEqual(segs[0].focus.x, 0.32, accuracy: 0.001)
-        XCTAssertEqual(segs[0].focus.y, 0.42, accuracy: 0.001)
+        XCTAssertEqual(segs[0].focusKeys.count, 1)               // all fit one viewport → no pan
+        XCTAssertEqual(segs[0].focus.x, 0.30, accuracy: 0.001)   // focus = first click (clamped)
+        XCTAssertEqual(segs[0].focus.y, 0.40, accuracy: 0.001)
         XCTAssertEqual(segs[0].scale, 2.0, accuracy: 0.0001)
         // Anticipation: the zoom starts BEFORE the first click and is fully in exactly at it.
         XCTAssertLessThan(segs[0].start, 3.0)
         XCTAssertEqual(segs[0].start + segs[0].easeIn, 3.0, accuracy: 0.001)
-        XCTAssertGreaterThan(segs[0].end, 3.6 + 0.5)                  // lingers past the last click
+        XCTAssertGreaterThan(segs[0].end, 3.6 + 0.5)             // lingers past the last click
+    }
+
+    func testOutOfViewClickPansAndArrivesAtClickTime() {
+        let clicks = [
+            ClickEvent(time: 2.0, point: .init(x: 0.2, y: 0.5)),
+            ClickEvent(time: 5.0, point: .init(x: 0.8, y: 0.5)), // within chain, but out of viewport
+        ]
+        let segs = AutoZoom.segments(clicks: clicks, settings: on)
+        XCTAssertEqual(segs.count, 1)                            // one held zoom
+        XCTAssertEqual(segs[0].focusKeys.count, 2)               // panned to the second click
+        // Holds on the first click, arrives at the second exactly at its click time, between mid-pan.
+        XCTAssertEqual(ZoomTimeline.state(at: 2.5, segments: segs).focus.x, 0.25, accuracy: 0.02)
+        XCTAssertEqual(ZoomTimeline.state(at: 5.0, segments: segs).focus.x, 0.75, accuracy: 0.02)
+        let mid = ZoomTimeline.state(at: 4.85, segments: segs).focus.x
+        XCTAssertGreaterThan(mid, 0.25); XCTAssertLessThan(mid, 0.75)
+        // Crucially the scale never drops during the pan — it stays zoomed, doesn't zoom out/in.
+        XCTAssertEqual(ZoomTimeline.state(at: 4.85, segments: segs).scale, 2.0, accuracy: 0.01)
     }
 
     func testZoomIsFullyInAtTheClickAndHoldsAfter() {
@@ -47,7 +65,7 @@ final class AutoZoomTests: XCTestCase {
     func testTimeSeparatedClicksSplitAndDoNotOverlap() {
         let clicks = [
             ClickEvent(time: 1.0, point: .init(x: 0.15, y: 0.15)),
-            ClickEvent(time: 4.0, point: .init(x: 0.85, y: 0.85)),    // >2s later → new zoom
+            ClickEvent(time: 6.0, point: .init(x: 0.85, y: 0.85)),    // beyond the chain gap → new zoom
         ]
         let segs = AutoZoom.segments(clicks: clicks, settings: on)
         XCTAssertEqual(segs.count, 2)
@@ -66,6 +84,7 @@ final class AutoZoomTests: XCTestCase {
         ]
         let segs = AutoZoom.segments(clicks: clicks, settings: on)
         XCTAssertEqual(segs.count, 1)
+        XCTAssertEqual(segs[0].focusKeys.count, 3)    // panned to each out-of-view click, still one zoom
         XCTAssertGreaterThan(segs[0].end, 2.9 + 1.0)  // holds ~1s past the last click, then eases out
     }
 

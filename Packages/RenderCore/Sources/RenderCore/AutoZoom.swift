@@ -27,21 +27,40 @@ public struct ClickEvent: Equatable, Sendable {
     }
 }
 
-/// One computed zoom "hold": between `start` and `end` the screen zooms to `scale` about `focus`
-/// (normalized, top-left), easing in over `easeIn` and out over `easeOut` seconds.
+/// A focus target at a point in time. A held zoom carries a list of these and *pans* between them,
+/// so the view stays magnified and glides to a new region instead of zooming out and back in.
+public struct FocusKey: Codable, Equatable, Sendable {
+    public var time: Double
+    public var point: CGPoint // normalized, top-left
+    public init(time: Double, point: CGPoint) { (self.time, self.point) = (time, point) }
+}
+
+/// One computed zoom "hold": between `start` and `end` the screen zooms to `scale`, easing in over
+/// `easeIn` and out over `easeOut`. The focus follows `focusKeys` (a single key = a static focus;
+/// multiple keys = a pan that arrives at each key's time).
 public struct ZoomSegment: Equatable, Sendable {
     public var start: Double
     public var end: Double
     public var easeIn: Double
     public var easeOut: Double
-    public var focus: CGPoint
     public var scale: Double
+    public var focusKeys: [FocusKey]
+
     public init(start: Double, end: Double, easeIn: Double, easeOut: Double,
-                focus: CGPoint, scale: Double) {
+                scale: Double, focusKeys: [FocusKey]) {
         self.start = start; self.end = end
         self.easeIn = easeIn; self.easeOut = easeOut
-        self.focus = focus; self.scale = scale
+        self.scale = scale; self.focusKeys = focusKeys
     }
+
+    /// Convenience for a static (single-focus) zoom.
+    public init(start: Double, end: Double, easeIn: Double, easeOut: Double,
+                focus: CGPoint, scale: Double) {
+        self.init(start: start, end: end, easeIn: easeIn, easeOut: easeOut,
+                  scale: scale, focusKeys: [FocusKey(time: start, point: focus)])
+    }
+
+    public var focus: CGPoint { focusKeys.first?.point ?? CGPoint(x: 0.5, y: 0.5) }
 }
 
 /// A persisted, user-editable zoom on the timeline. Auto-generated ones are seeded from clicks
@@ -56,17 +75,24 @@ public struct ZoomSpec: Codable, Equatable, Sendable, Identifiable {
     public var focus: CGPoint
     public var scale: Double
     public var manual: Bool
+    /// Optional pan track. `nil`/empty = static `focus`; multiple keys = an auto-generated pan.
+    /// Additive: specs persisted before panning existed decode this as `nil`.
+    public var focusKeys: [FocusKey]?
 
     public init(id: String, start: Double, end: Double, easeIn: Double, easeOut: Double,
-                focus: CGPoint, scale: Double, manual: Bool) {
+                focus: CGPoint, scale: Double, manual: Bool, focusKeys: [FocusKey]? = nil) {
         self.id = id; self.start = start; self.end = end
         self.easeIn = easeIn; self.easeOut = easeOut
-        self.focus = focus; self.scale = scale; self.manual = manual
+        self.focus = focus; self.scale = scale; self.manual = manual; self.focusKeys = focusKeys
     }
 
     public var segment: ZoomSegment {
-        ZoomSegment(start: start, end: end, easeIn: easeIn, easeOut: easeOut,
-                    focus: focus, scale: scale)
+        if let keys = focusKeys, !keys.isEmpty {
+            return ZoomSegment(start: start, end: end, easeIn: easeIn, easeOut: easeOut,
+                               scale: scale, focusKeys: keys)
+        }
+        return ZoomSegment(start: start, end: end, easeIn: easeIn, easeOut: easeOut,
+                           focus: focus, scale: scale)
     }
 }
 
@@ -84,26 +110,27 @@ public struct ZoomState: Equatable, Sendable {
 }
 
 public enum AutoZoom {
-    static let chainGap = 2.0         // clicks within this many seconds of the last one chain
-    static let postClickHold = 1.0    // wait this long after the last click before easing out
+    static let chainGap = 3.5          // clicks within this many seconds of the last one chain
+    static let postClickHold = 1.0     // wait this long after the last click before easing out
+    static let panMargin: CGFloat = 0.85 // a click within this fraction of the viewport stays in view
 
     /// Deterministically turns clicks into non-overlapping zoom segments. Empty when disabled or
     /// when there are no clicks.
     ///
-    /// Timing anticipates the click: the zoom-in *completes as the click lands* (it begins ~`leadIn`
-    /// seconds earlier, so you see the pointer arrive at an already-magnified target), holds through
-    /// the cluster plus `postClickHold`, then eases back out.
+    /// A burst of clicks (chained within `chainGap`) becomes ONE held zoom that *pans*: the zoom-in
+    /// completes as the first click lands, then the focus stays put while clicks land inside the
+    /// current viewport and only glides ("pans") to a new click when that click falls outside the
+    /// viewport — so the view stays magnified and moves to follow you instead of zooming out and back
+    /// in on every click. Holds `postClickHold` after the last click, then eases out.
     public static func segments(clicks: [ClickEvent], settings: AutoZoomSettings) -> [ZoomSegment] {
         guard settings.enabled, !clicks.isEmpty else { return [] }
         let level = min(max(settings.level, 1.5), 3.0)
         let speed = min(max(settings.speed, 0), 1)
         let leadIn = lerp(1.3, 0.7, speed)   // ~1s anticipation window at the default speed
         let easeOut = lerp(0.8, 0.4, speed)
+        let half = CGFloat(0.5 / level)      // half-extent of the viewport in normalized coords
 
         let sorted = clicks.sorted { $0.time < $1.time }
-        // Chain by time only: a click within `chainGap` of the *previous* click extends the same
-        // zoom, regardless of where on screen it is. This keeps one steady hold through a burst of
-        // activity instead of flickering in and out on every click.
         var clusters: [[ClickEvent]] = []
         for c in sorted {
             if var last = clusters.last, let lastT = last.last?.time, c.time - lastT <= chainGap {
@@ -115,14 +142,28 @@ public enum AutoZoom {
         }
 
         var segments = clusters.map { cluster -> ZoomSegment in
-            let focus = centroid(cluster.map(\.point))
             let firstT = cluster.first!.time
             let lastT = cluster.last!.time
+            // Pan keyframes: keep the current focus while clicks land within the viewport; re-centre
+            // on a click only when it falls outside (with a small margin).
+            var focus = clampFocus(cluster[0].point, half: half)
+            var keys = [FocusKey(time: firstT, point: focus)]
+            for c in cluster.dropFirst() {
+                let inView = abs(c.point.x - focus.x) <= half * panMargin
+                    && abs(c.point.y - focus.y) <= half * panMargin
+                if !inView {
+                    let nf = clampFocus(c.point, half: half)
+                    if hypot(nf.x - focus.x, nf.y - focus.y) > 0.01 {
+                        focus = nf
+                        keys.append(FocusKey(time: c.time, point: focus))
+                    }
+                }
+            }
             let start = max(0, firstT - leadIn)
             let easeIn = firstT - start          // fully zoomed exactly at the first click
             let end = lastT + postClickHold + easeOut
             return ZoomSegment(start: start, end: end, easeIn: easeIn, easeOut: easeOut,
-                               focus: focus, scale: level)
+                               scale: level, focusKeys: keys)
         }
 
         // Keep segments non-overlapping so the evaluator's "first active" pick is unambiguous.
@@ -132,22 +173,43 @@ public enum AutoZoom {
         return segments
     }
 
-    static func centroid(_ points: [CGPoint]) -> CGPoint {
-        guard !points.isEmpty else { return CGPoint(x: 0.5, y: 0.5) }
-        let n = CGFloat(points.count)
-        return CGPoint(x: points.map(\.x).reduce(0, +) / n,
-                       y: points.map(\.y).reduce(0, +) / n)
+    /// Clamps a focus so its `1/scale` viewport stays fully within the frame (no empty edges).
+    static func clampFocus(_ p: CGPoint, half: CGFloat) -> CGPoint {
+        CGPoint(x: min(max(p.x, half), 1 - half), y: min(max(p.y, half), 1 - half))
     }
 
     static func lerp(_ a: Double, _ b: Double, _ t: Double) -> Double { a + (b - a) * t }
 }
 
 public enum ZoomTimeline {
+    static let panDuration = 0.45 // seconds to glide between focus keyframes (arriving at the click)
+
     /// The zoom to apply at composition time `t`. Segments are non-overlapping and time-ordered.
     public static func state(at t: Double, segments: [ZoomSegment]) -> ZoomState {
         guard let s = segments.first(where: { t >= $0.start && t < $0.end }) else { return .identity }
         let f = envelope(t, s)
-        return ZoomState(scale: 1 + (s.scale - 1) * f, focus: s.focus, progress: f)
+        return ZoomState(scale: 1 + (s.scale - 1) * f, focus: focus(at: t, keys: s.focusKeys),
+                         progress: f)
+    }
+
+    /// Focus at time `t`: holds each keyframe's point, then glides to the next over `panDuration`,
+    /// arriving as that click lands. Before the first key it holds the first point (the zoom-in
+    /// grows toward it).
+    static func focus(at t: Double, keys: [FocusKey]) -> CGPoint {
+        guard let first = keys.first else { return CGPoint(x: 0.5, y: 0.5) }
+        if keys.count == 1 || t <= first.time { return first.point }
+        for i in 1..<keys.count {
+            let prev = keys[i - 1], cur = keys[i]
+            if t < cur.time {
+                let pan = min(panDuration, cur.time - prev.time)
+                let panStart = cur.time - pan
+                if t <= panStart { return prev.point }
+                let u = smoothstep((t - panStart) / max(pan, 1e-6))
+                return CGPoint(x: prev.point.x + (cur.point.x - prev.point.x) * u,
+                               y: prev.point.y + (cur.point.y - prev.point.y) * u)
+            }
+        }
+        return keys.last!.point
     }
 
     /// 0 at the segment edges, 1 across the hold, smoothstepped through the ease ramps.

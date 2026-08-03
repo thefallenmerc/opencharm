@@ -132,8 +132,20 @@ final class StylingModel: ObservableObject {
         segments.map {
             ZoomSpec(id: UUID().uuidString, start: $0.start, end: $0.end,
                      easeIn: $0.easeIn, easeOut: $0.easeOut, focus: $0.focus,
-                     scale: $0.scale, manual: manual)
+                     scale: $0.scale, manual: manual, focusKeys: $0.focusKeys)
         }
+    }
+
+    /// Moves a zoom (and its pan keyframes) by `dt` seconds, clamped within the clip.
+    func shiftZoom(_ spec: ZoomSpec, by dt: Double) {
+        let len = spec.end - spec.start
+        let newStart = min(max(0, spec.start + dt), max(0, duration - len))
+        let applied = newStart - spec.start
+        var s = spec
+        s.start = newStart
+        s.end = newStart + len
+        s.focusKeys = spec.focusKeys?.map { FocusKey(time: $0.time + applied, point: $0.point) }
+        updateZoom(s)
     }
 
     /// Centroid of the cursor path within [start,end] (falls back to the last known position, then

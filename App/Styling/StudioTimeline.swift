@@ -200,12 +200,7 @@ struct StudioTimeline: View {
         .onTapGesture { selectedID = selected ? nil : spec.id }
         .gesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(space))
             .onChanged { v in
-                let dt = (v.translation.width) / pps
-                var s = spec
-                let len = spec.end - spec.start
-                s.start = min(max(0, spec.start + dt), dur - len)
-                s.end = s.start + len
-                model.updateZoom(s)
+                model.shiftZoom(spec, by: v.translation.width / pps)
                 selectedID = spec.id
             })
     }
