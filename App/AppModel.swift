@@ -74,8 +74,13 @@ final class AppModel: ObservableObject {
 
     /// Opens (or brings forward) the Studio window showing `pkg`. The single entry
     /// point for stop-flow, launch recovery, and Open Project.
-    func openStudio(_ pkg: ProjectPackage) {
-        studio.show(package: pkg)
+    func openStudio(_ pkg: ProjectPackage, savedArchive: URL? = nil) {
+        studio.show(package: pkg, savedArchive: savedArchive)
+    }
+
+    /// Quit-time save prompt for an open Studio project with unsaved work.
+    func applicationShouldTerminate() -> NSApplication.TerminateReply {
+        studio.promptSaveForTermination()
     }
 
     var missingPermissions: [PermissionKind] {

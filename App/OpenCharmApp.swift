@@ -18,6 +18,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppModel.shared?.checkRecoveryOnLaunchOnce()
         AppModel.shared?.launchUI()
     }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        AppModel.shared?.applicationShouldTerminate() ?? .terminateNow
+    }
 }
 
 @main
