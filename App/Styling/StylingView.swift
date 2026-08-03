@@ -27,6 +27,8 @@ struct StylingView: View {
                 .frame(minWidth: 480, minHeight: 320)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            Divider()
+            StudioTimeline(model: model)
         }
         .alert("OpenCharm", isPresented: Binding(
             get: { model.errorMessage != nil },

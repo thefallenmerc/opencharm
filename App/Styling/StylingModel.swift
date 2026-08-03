@@ -15,6 +15,7 @@ final class StylingModel: ObservableObject {
     /// Playhead position and clip length (composition seconds) — drive the Studio timeline.
     @Published var currentTime: Double = 0
     @Published var duration: Double = 0
+    @Published var isPlaying = false
 
     let player = AVPlayer()
     private(set) var package: ProjectPackage
@@ -36,6 +37,9 @@ final class StylingModel: ObservableObject {
             forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] t in
             MainActor.assumeIsolated { self?.currentTime = t.seconds }
         }
+        player.publisher(for: \.timeControlStatus)
+            .map { $0 == .playing }
+            .assign(to: &$isPlaying)
         Task { await initialLoad() }
     }
 
@@ -196,6 +200,16 @@ final class StylingModel: ObservableObject {
         if player.timeControlStatus == .playing { player.pause() } else { player.play() }
     }
 
+    /// Bounds preview playback to the trimmed range (stops at trimEnd). Export applies the real cut.
+    func applyTrim() {
+        guard let item = player.currentItem else { return }
+        if let end = renderSettings.trimEnd {
+            item.forwardPlaybackEndTime = CMTime(seconds: end, preferredTimescale: 600)
+        } else {
+            item.forwardPlaybackEndTime = .invalid
+        }
+    }
+
     func rebuildComposition() async {
         processingAudio = true
         defer { processingAudio = false }
@@ -229,6 +243,7 @@ final class StylingModel: ObservableObject {
             item.audioMix = built.audioMix
             let time = player.currentTime()
             player.replaceCurrentItem(with: item)
+            applyTrim()
             if time.isValid, time.seconds > 0 {
                 await player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
             }

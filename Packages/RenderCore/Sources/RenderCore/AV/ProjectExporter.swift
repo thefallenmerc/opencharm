@@ -68,6 +68,14 @@ public final class ProjectExporter {
 
         try? FileManager.default.removeItem(at: request.outputURL)
         let reader = try AVAssetReader(asset: built.composition)
+        // Trim: export only the kept range (segment/zoom times stay absolute on the composition clock).
+        if settings.trimStart != nil || settings.trimEnd != nil {
+            let start = settings.trimStart ?? 0
+            let end = settings.trimEnd ?? built.composition.duration.seconds
+            reader.timeRange = CMTimeRange(
+                start: CMTime(seconds: start, preferredTimescale: 600),
+                end: CMTime(seconds: max(start, end), preferredTimescale: 600))
+        }
         let videoOut = AVAssetReaderVideoCompositionOutput(
             videoTracks: built.composition.tracks(withMediaType: .video),
             videoSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
