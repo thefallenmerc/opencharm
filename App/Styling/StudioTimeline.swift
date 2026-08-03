@@ -10,6 +10,7 @@ struct StudioTimeline: View {
     @State private var timelineZoom: Double = 1        // 1 = fit whole clip to width (100%)
     @State private var pendingStart: Double?           // first click of a two-click zoom
     @State private var selectedID: String?
+    @State private var drag: ZoomDragAnchor?           // captured at drag start so deltas don't compound
 
     private let rulerH: CGFloat = 16
     private let trackH: CGFloat = 30
@@ -196,13 +197,51 @@ struct StudioTimeline: View {
             .fill(LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom)))
         .overlay(RoundedRectangle(cornerRadius: 7)
             .stroke(.white, lineWidth: selected ? 2 : 0))
+        .overlay(alignment: .leading) { if selected { resizeHandle(spec, pps: pps, leading: true) } }
+        .overlay(alignment: .trailing) { if selected { resizeHandle(spec, pps: pps, leading: false) } }
         .offset(x: x, y: 3)
         .onTapGesture { selectedID = selected ? nil : spec.id }
         .gesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(space))
             .onChanged { v in
-                model.shiftZoom(spec, by: v.translation.width / pps)
+                let a = beginDrag(spec)
+                let len = a.end - a.start
+                let newStart = min(max(0, a.start + v.translation.width / pps),
+                                   max(0, model.duration - len))
+                let applied = newStart - a.start
+                var s = spec
+                s.start = newStart; s.end = newStart + len
+                s.focusKeys = a.keys?.map { FocusKey(time: $0.time + applied, point: $0.point) }
+                model.updateZoom(s)
                 selectedID = spec.id
-            })
+            }
+            .onEnded { _ in drag = nil })
+    }
+
+    /// A grab handle on a selected pill's edge; dragging it changes the zoom's start (leading) or
+    /// end (trailing) — i.e. its duration.
+    private func resizeHandle(_ spec: ZoomSpec, pps: Double, leading: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 2).fill(.white)
+            .frame(width: 7, height: laneH - 12)
+            .overlay(RoundedRectangle(cornerRadius: 2).stroke(.black.opacity(0.35)))
+            .padding(.horizontal, 1)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .named(space))
+                .onChanged { v in
+                    let a = beginDrag(spec)
+                    let dt = v.translation.width / pps
+                    if leading { model.resizeZoom(spec, start: a.start + dt) }
+                    else { model.resizeZoom(spec, end: a.end + dt) }
+                }
+                .onEnded { _ in drag = nil })
+    }
+
+    /// Captures the pill's start/end/keys at the first drag callback so subsequent (translation-based)
+    /// callbacks compute an absolute position instead of compounding as the model re-renders mid-drag.
+    private func beginDrag(_ spec: ZoomSpec) -> ZoomDragAnchor {
+        if let d = drag, d.id == spec.id { return d }
+        let d = ZoomDragAnchor(id: spec.id, start: spec.start, end: spec.end, keys: spec.focusKeys)
+        drag = d
+        return d
     }
 
     // MARK: playhead
@@ -236,4 +275,12 @@ struct StudioTimeline: View {
         let v = max(0, Int(s.rounded()))
         return String(format: "%d:%02d", v / 60, v % 60)
     }
+}
+
+/// The pill's geometry captured at the start of a move/resize drag.
+private struct ZoomDragAnchor {
+    let id: String
+    let start: Double
+    let end: Double
+    let keys: [FocusKey]?
 }

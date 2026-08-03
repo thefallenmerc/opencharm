@@ -136,15 +136,16 @@ final class StylingModel: ObservableObject {
         }
     }
 
-    /// Moves a zoom (and its pan keyframes) by `dt` seconds, clamped within the clip.
-    func shiftZoom(_ spec: ZoomSpec, by dt: Double) {
-        let len = spec.end - spec.start
-        let newStart = min(max(0, spec.start + dt), max(0, duration - len))
-        let applied = newStart - spec.start
+    /// Resizes a zoom by setting a new start and/or end (composition seconds), clamped to a minimum
+    /// length. Keeps the pan keyframes at their absolute times; eases are capped to fit.
+    func resizeZoom(_ spec: ZoomSpec, start: Double? = nil, end: Double? = nil) {
+        let minLen = 0.3
         var s = spec
-        s.start = newStart
-        s.end = newStart + len
-        s.focusKeys = spec.focusKeys?.map { FocusKey(time: $0.time + applied, point: $0.point) }
+        if let start { s.start = min(max(0, start), s.end - minLen) }
+        if let end { s.end = max(min(max(duration, minLen), end), s.start + minLen) }
+        let d = s.end - s.start
+        s.easeIn = min(s.easeIn, d / 2)
+        s.easeOut = min(s.easeOut, d / 2)
         updateZoom(s)
     }
 
