@@ -31,6 +31,13 @@ Capture cannot run on CI — walk this list on real hardware.
    holds, and eases out; Zoom level / Speed sliders take effect; toggling off returns
    to a static frame. (Window recordings show "no click data" — expected.) Export and
    confirm the zoom is baked into the file.
+8b. Timeline editor (below the preview): the playhead scrubs by dragging the ruler/
+   track; play/pause and skip-to-ends work; current/total time update. Auto-zoom shows
+   as yellow "N×" tags; two clicks in the zoom lane create a manual zoom focused on the
+   cursor (preview zooms there); selecting a tag shows a level slider + Delete; dragging
+   a tag moves it. Drag the white trim handles / press Cut to shorten the clip — the
+   export is shorter and tags still line up. The "100%" slider zooms the timeline; the
+   webcam bubble is large by default and roughly halves while a zoom holds.
 9. Export Source/1080p/4K in both codecs; files play in QuickTime; the webcam
    overlay fills its circle (no squeeze/stretch); Reveal in Finder works.
 10. Kill the app (Force Quit) 5 s into a recording. Relaunch: recovery prompt at
