@@ -126,6 +126,7 @@ public final class RecordingEngine: ObservableObject {
             pkg.manifest.systemAudio = TrackRef(filename: "system.caf", startOffset: p - epoch)
         }
         pkg.manifest.captureRect = captureGlobalRect
+        pkg.manifest.hidesSystemCursor = true // capture hides the cursor; the editor draws its own
         try? pkg.saveManifest()
         package = pkg
         events?.epoch = epoch

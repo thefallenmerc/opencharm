@@ -38,6 +38,13 @@ struct InspectorView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            if model.hasSyntheticCursor {
+                Section("Cursor") {
+                    slider("Size", cursorSize, 0.02...0.09)
+                    Text("A larger pointer, drawn in post so it's easy to follow (grows on zoom).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Section("Webcam") {
                 Toggle("Show webcam", isOn: $model.renderSettings.webcam.visible)
                 slider("Size", $model.renderSettings.webcam.size, 0.1...0.6)
@@ -64,6 +71,11 @@ struct InspectorView: View {
 
     func slider(_ label: String, _ value: Binding<Double>, _ range: ClosedRange<Double>) -> some View {
         LabeledContent(label) { Slider(value: value, in: range) }
+    }
+
+    var cursorSize: Binding<Double> {
+        Binding { model.renderSettings.cursorSize ?? 0.04 }
+        set: { model.renderSettings.cursorSize = $0 }
     }
 
     var autoZoomEnabled: Binding<Bool> {

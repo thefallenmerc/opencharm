@@ -43,12 +43,16 @@ final class ExportModel: ObservableObject {
                                                    forPreview: false)
                 }.value
                 let clicks = styling.autoZoomClicks
+                let cursorSamples = styling.exportCursorSamples
+                let cursorImage = styling.exportCursorImage
                 let exporter = ProjectExporter(
                     timeline: timeline,
                     settings: settings,
                     sourceCanvasSize: canvas,
                     backgroundImage: bg,
-                    clicks: clicks)
+                    clicks: clicks,
+                    cursorSamples: cursorSamples,
+                    cursorImage: cursorImage)
                 self.exporter = exporter
                 try await exporter.export(
                     ExportRequest(outputURL: url, codec: codec, resolution: resolution)) { p in

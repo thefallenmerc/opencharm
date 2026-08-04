@@ -44,8 +44,10 @@ final class ManifestTests: XCTestCase {
     func testCaptureRectRoundTrips() throws {
         var m = fullManifest()
         m.captureRect = CGRect(x: 100, y: 50, width: 1920, height: 1080)
+        m.hidesSystemCursor = true
         let back = try ManifestMigrator.load(from: try ManifestMigrator.save(m))
         XCTAssertEqual(back.captureRect, CGRect(x: 100, y: 50, width: 1920, height: 1080))
+        XCTAssertEqual(back.hidesSystemCursor, true)
         XCTAssertEqual(m, back)
     }
 

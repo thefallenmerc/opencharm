@@ -27,11 +27,14 @@ public struct ProjectManifest: Codable, Equatable, Sendable {
     /// and for projects recorded before this field existed. Optional/additive: old manifests decode
     /// this as `nil`.
     public var captureRect: CGRect?
+    /// True when the recording hid the system cursor (so the editor draws its own synthetic pointer
+    /// from the event track). `nil`/false for older recordings that baked the cursor into the video.
+    public var hidesSystemCursor: Bool?
 
     public init(schemaVersion: Int, createdAt: Date, screen: TrackRef,
                 webcam: TrackRef? = nil, mic: TrackRef? = nil, systemAudio: TrackRef? = nil,
                 renderSettings: RenderSettings, audioSettings: AudioSettings,
-                captureRect: CGRect? = nil) {
+                captureRect: CGRect? = nil, hidesSystemCursor: Bool? = nil) {
         self.schemaVersion = schemaVersion
         self.createdAt = createdAt
         self.screen = screen
@@ -41,5 +44,6 @@ public struct ProjectManifest: Codable, Equatable, Sendable {
         self.renderSettings = renderSettings
         self.audioSettings = audioSettings
         self.captureRect = captureRect
+        self.hidesSystemCursor = hidesSystemCursor
     }
 }

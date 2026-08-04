@@ -41,6 +41,15 @@ final class StylingModel: ObservableObject {
     private var saveDebounce: Task<Void, Never>?
     private var timeObserver: Any?
     private var isLoaded = false
+    /// New recordings hide the system cursor; the compositor draws this synthetic pointer instead.
+    var hasSyntheticCursor: Bool { package.manifest.hidesSystemCursor ?? false }
+    private lazy var cursorImage = CursorImage.make()
+    private var cursorTrack: [CursorSample] {
+        hasSyntheticCursor ? cursorSamples.map { CursorSample(time: $0.time, point: $0.point) } : []
+    }
+    /// Cursor inputs for the exporter (mirrors what the preview uses).
+    var exportCursorSamples: [CursorSample] { cursorTrack }
+    var exportCursorImage: CIImage? { hasSyntheticCursor ? cursorImage : nil }
 
     init(package: ProjectPackage, savedArchiveURL: URL? = nil) {
         self.package = package
@@ -303,7 +312,8 @@ final class StylingModel: ObservableObject {
             guard !Task.isCancelled else { return }
             let built = try await ProjectCompositionBuilder.build(
                 timeline: timeline, settings: settings, canvasSize: canvas,
-                backgroundImage: bg, clicks: clicks)
+                backgroundImage: bg, clicks: clicks,
+                cursorSamples: cursorTrack, cursorImage: cursorImage)
             guard !Task.isCancelled else { return }
             duration = built.composition.duration.seconds
             let item = AVPlayerItem(asset: built.composition)
@@ -347,7 +357,8 @@ final class StylingModel: ObservableObject {
                 guard !Task.isCancelled else { return }
                 let built = try await ProjectCompositionBuilder.build(
                     timeline: timeline, settings: settings, canvasSize: canvas,
-                    backgroundImage: bg, clicks: clicks)
+                    backgroundImage: bg, clicks: clicks,
+                    cursorSamples: cursorTrack, cursorImage: cursorImage)
                 guard !Task.isCancelled else { return }
                 item.videoComposition = built.videoComposition
                 if player.rate == 0 { // refresh the paused frame

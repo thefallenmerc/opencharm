@@ -70,7 +70,7 @@ public final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
         streamConfig.height = Int(capturePixelSize.height)
         streamConfig.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(configuration.fps))
         streamConfig.pixelFormat = kCVPixelFormatType_32BGRA
-        streamConfig.showsCursor = true
+        streamConfig.showsCursor = false // the editor draws its own (bigger) pointer from the event track
         streamConfig.queueDepth = 8
         if systemAudioURL != nil, configuration.capturesSystemAudio {
             streamConfig.capturesAudio = true
