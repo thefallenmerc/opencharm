@@ -18,16 +18,23 @@ final class CharmInstruction: NSObject, AVVideoCompositionInstructionProtocol {
     let settings: RenderSettings
     let backgroundImage: CIImage?
     let zoomSegments: [ZoomSegment]
+    let cursorSamples: [CursorSample]
+    let cursorImage: CIImage?
+    let cursorSize: Double
 
     init(timeRange: CMTimeRange, screenTrackID: CMPersistentTrackID,
          webcamTrackID: CMPersistentTrackID?, settings: RenderSettings,
-         backgroundImage: CIImage?, zoomSegments: [ZoomSegment] = []) {
+         backgroundImage: CIImage?, zoomSegments: [ZoomSegment] = [],
+         cursorSamples: [CursorSample] = [], cursorImage: CIImage? = nil, cursorSize: Double = 0.04) {
         self.timeRange = timeRange
         self.screenTrackID = screenTrackID
         self.webcamTrackID = webcamTrackID
         self.settings = settings
         self.backgroundImage = backgroundImage
         self.zoomSegments = zoomSegments
+        self.cursorSamples = cursorSamples
+        self.cursorImage = cursorImage
+        self.cursorSize = cursorSize
     }
 }
 
@@ -97,10 +104,16 @@ public final class CharmVideoCompositor: NSObject, AVVideoCompositing {
 
         let zoom = ZoomTimeline.state(at: request.compositionTime.seconds,
                                       segments: instruction.zoomSegments)
+        var cursor: CursorFrame?
+        if let img = instruction.cursorImage,
+           let pt = CursorTrack.point(at: request.compositionTime.seconds,
+                                      samples: instruction.cursorSamples) {
+            cursor = CursorFrame(image: img, point: pt, sizeFraction: instruction.cursorSize)
+        }
         let rendered = compositor.render(
             RenderInputs(screen: screenImage, webcam: webcamImage,
                          backgroundImage: instruction.backgroundImage),
-            settings: instruction.settings, canvasSize: canvasSize, zoom: zoom)
+            settings: instruction.settings, canvasSize: canvasSize, zoom: zoom, cursor: cursor)
         context.render(rendered, to: output)
         request.finish(withComposedVideoFrame: output)
     }

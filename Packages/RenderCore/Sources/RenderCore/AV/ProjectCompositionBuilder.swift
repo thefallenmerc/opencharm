@@ -13,7 +13,9 @@ public enum ProjectCompositionBuilder {
     public static func build(timeline: MediaTimeline, settings: RenderSettings,
                              canvasSize: CGSize,
                              backgroundImage: CIImage?,
-                             clicks: [ClickEvent] = []) async throws -> BuiltComposition {
+                             clicks: [ClickEvent] = [],
+                             cursorSamples: [CursorSample] = [],
+                             cursorImage: CIImage? = nil) async throws -> BuiltComposition {
         let composition = AVMutableComposition()
 
         func addVideo(_ track: MediaTimeline.VideoTrack) async throws -> CMPersistentTrackID {
@@ -62,7 +64,9 @@ public enum ProjectCompositionBuilder {
             timeRange: CMTimeRange(start: .zero, duration: composition.duration),
             screenTrackID: screenID, webcamTrackID: webcamID,
             settings: settings, backgroundImage: backgroundImage,
-            zoomSegments: zoomSegments)]
+            zoomSegments: zoomSegments,
+            cursorSamples: cursorSamples, cursorImage: cursorImage,
+            cursorSize: settings.cursorSize ?? 0.04)]
 
         var audioMix: AVAudioMix?
         if !mixParams.isEmpty {

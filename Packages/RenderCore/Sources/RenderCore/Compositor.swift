@@ -15,7 +15,8 @@ public final class Compositor {
     public init() {}
 
     public func render(_ inputs: RenderInputs, settings: RenderSettings,
-                       canvasSize: CGSize, zoom: ZoomState = .identity) -> CIImage {
+                       canvasSize: CGSize, zoom: ZoomState = .identity,
+                       cursor: CursorFrame? = nil) -> CIImage {
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
         // Auto-zoom is a crop of the screen layer only; the crop preserves aspect, so the layout
         // (contentRect, corner radius, webcam, shadow) is unaffected.
@@ -43,6 +44,10 @@ public final class Compositor {
         }
         result = place(screen, in: layout.contentRect,
                        cornerRadius: layout.cornerRadius, over: result)
+        if let cursor {
+            result = drawCursor(cursor, zoom: zoom, contentRect: layout.contentRect,
+                                canvasSize: canvasSize, over: result)
+        }
         result = webcamLayer(inputs.webcam, settings: settings, layout: layout, over: result)
         // Contract: output is always opaque, regardless of any alpha < 1 in caller-supplied
         // inputs (e.g. a semi-transparent solid/gradient color or a backgroundImage with alpha).
@@ -66,6 +71,32 @@ public final class Compositor {
         minX = min(max(minX, e.minX), e.maxX - cw)
         minY = min(max(minY, e.minY), e.maxY - ch)
         return screen.cropped(to: CGRect(x: minX, y: minY, width: cw, height: ch))
+    }
+
+    /// Draws the synthetic pointer at the cursor's location — mapped through the same zoom crop as
+    /// the screen, so it tracks the visible content, grows with the zoom, and hides when the pointer
+    /// is outside the zoomed viewport. The image's top-left corner is placed at the pointer tip.
+    func drawCursor(_ cursor: CursorFrame, zoom: ZoomState, contentRect: CGRect,
+                    canvasSize: CGSize, over bg: CIImage) -> CIImage {
+        let scale = CGFloat(max(zoom.scale, 1))
+        let half = 0.5 / scale
+        let nx = cursor.point.x, ny = cursor.point.y                  // pointer, normalized top-left
+        // crop is centred on the (clamped) zoom focus — same as `zoomedScreen`.
+        let cx = min(max(zoom.focus.x, half), 1 - half)
+        let cy = min(max(zoom.focus.y, half), 1 - half)
+        let u = (nx - (cx - half)) / (2 * half)                       // pointer position within the crop
+        let v = (ny - (cy - half)) / (2 * half)
+        guard u >= 0, u <= 1, v >= 0, v <= 1 else { return bg }       // outside the zoomed viewport
+        let px = contentRect.minX + u * contentRect.width
+        let py = contentRect.minY + (1 - v) * contentRect.height      // y-up
+        let h = CGFloat(cursor.sizeFraction) * canvasSize.height * scale
+        let img = cursor.image
+        guard img.extent.height > 0 else { return bg }
+        let s = h / img.extent.height
+        let scaled = img.transformed(by: CGAffineTransform(scaleX: s, y: s))
+        let positioned = scaled.transformed(by: CGAffineTransform(
+            translationX: px - scaled.extent.minX, y: py - scaled.extent.maxY))
+        return positioned.composited(over: bg)
     }
 
     /// Scales a rect about its center by `f` (used to shrink the webcam bubble during zoom).

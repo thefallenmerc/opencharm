@@ -54,11 +54,15 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     /// Trim in/out points in composition seconds. `nil` = no trim on that side.
     public var trimStart: Double?
     public var trimEnd: Double?
+    /// Synthetic-pointer height as a fraction of canvas height (before zoom magnification). `nil` =
+    /// the default. Only used when the recording hid the system cursor.
+    public var cursorSize: Double?
 
     public init(background: Background, paddingFraction: Double, cornerRadiusFraction: Double,
                 shadow: ShadowSettings, webcam: WebcamSettings,
                 autoZoom: AutoZoomSettings? = nil,
-                zooms: [ZoomSpec]? = nil, trimStart: Double? = nil, trimEnd: Double? = nil) {
+                zooms: [ZoomSpec]? = nil, trimStart: Double? = nil, trimEnd: Double? = nil,
+                cursorSize: Double? = nil) {
         self.background = background
         self.paddingFraction = paddingFraction
         self.cornerRadiusFraction = cornerRadiusFraction
@@ -68,6 +72,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         self.zooms = zooms
         self.trimStart = trimStart
         self.trimEnd = trimEnd
+        self.cursorSize = cursorSize
     }
 
     public static let `default` = RenderSettings(
