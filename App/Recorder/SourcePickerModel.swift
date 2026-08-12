@@ -65,10 +65,14 @@ final class SourcePickerModel: ObservableObject {
             guard let selectedArea else { return nil }
             source = .area(displayID: selectedDisplayID, rect: selectedArea)
         }
+        // Camera/mic are optional: without their permission the recording proceeds without
+        // those tracks instead of blocking (or failing to open the device mid-start).
+        let cameraOK = PermissionsService.status(.camera) == .granted
+        let micOK = PermissionsService.status(.microphone) == .granted
         return RecordingConfiguration(
             source: source,
-            webcamDeviceID: cameraEnabled ? cameraID : nil,
-            micDeviceID: micEnabled ? micID : nil,
+            webcamDeviceID: cameraEnabled && cameraOK ? cameraID : nil,
+            micDeviceID: micEnabled && micOK ? micID : nil,
             capturesSystemAudio: systemAudio, fps: fps,
             excludedWindowNumbers: excludedWindowNumbers)
     }

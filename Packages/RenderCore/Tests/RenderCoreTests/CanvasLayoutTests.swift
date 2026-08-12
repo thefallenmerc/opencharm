@@ -29,13 +29,15 @@ final class CanvasLayoutTests: XCTestCase {
         XCTAssertEqual(l.webcamCornerRadius, 100, accuracy: 0.001) // roundness 1 → circle
     }
 
-    func testWebcamRectClampedToCanvas() {
+    func testWebcamRectClampedInsideCanvasWithMargin() {
         var s = settings
         s.webcam.center = CGPoint(x: 0.99, y: 0.01)
         let l = CanvasLayout.compute(canvasSize: CGSize(width: 1000, height: 800),
                                      screenAspect: 2.0, settings: s)
-        XCTAssertEqual(l.webcamRect.maxX, 1000, accuracy: 0.001)
-        XCTAssertEqual(l.webcamRect.maxY, 800, accuracy: 0.001)
+        // Sticky to the corner, but with a 2.5%-of-minDim breathing margin (0.025 * 800 = 20)
+        // so the bubble never sits flush against the border.
+        XCTAssertEqual(l.webcamRect.maxX, 980, accuracy: 0.001)
+        XCTAssertEqual(l.webcamRect.maxY, 780, accuracy: 0.001)
     }
 
     func testShadowScalesWithCanvas() {

@@ -83,11 +83,11 @@ final class AppModel: ObservableObject {
         studio.promptSaveForTermination()
     }
 
+    /// Only screen recording BLOCKS a recording. Camera/mic are optional extras: without their
+    /// permission the recording simply proceeds without those tracks (grantable any time via
+    /// the onboarding popover).
     var missingPermissions: [PermissionKind] {
-        var needed: [PermissionKind] = [.screenRecording]
-        if sources.cameraEnabled, sources.cameraID != nil { needed.append(.camera) }
-        if sources.micEnabled, sources.micID != nil { needed.append(.microphone) }
-        return needed.filter { PermissionsService.status($0) != .granted }
+        PermissionsService.status(.screenRecording) == .granted ? [] : [.screenRecording]
     }
 
     /// Launch-time UI: called from AppDelegate after the recovery check. Requests

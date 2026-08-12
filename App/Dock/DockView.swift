@@ -41,6 +41,12 @@ struct DockView: View {
     }
 
     private func recordingBar(since start: Date) -> some View {
+        recordingBarContent(since: start)
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .background(pillBackground)
+    }
+
+    private func recordingBarContent(since start: Date) -> some View {
         // The red dot is the Stop button (a Button consumes the mouse-down, so clicking it never
         // drags the panel); the timer is inert, so grabbing it drags the pill via the panel's
         // isMovableByWindowBackground. On hover a soft red rounded backdrop appears behind the
@@ -72,17 +78,22 @@ struct DockView: View {
                     .foregroundStyle(.white)
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 9)
-        .background(pillBackground)
     }
 
     private var stoppingBar: some View {
-        HStack(spacing: 12) {
-            ProgressView().controlSize(.small)
-            Text("Finishing…").foregroundStyle(.white)
-        }
-        .padding(.horizontal, 14).padding(.vertical, 9)
-        .background(pillBackground)
+        // The hidden recording bar is a sizing template: the pill keeps EXACTLY the recording
+        // state's dimensions while finishing (overlay can't resize it), so the dock never
+        // jumps between the two states.
+        recordingBarContent(since: .now)
+            .hidden()
+            .overlay {
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text("Finishing…").font(.system(size: 13)).foregroundStyle(.white)
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .background(pillBackground)
     }
 
     private var pillBackground: some View {

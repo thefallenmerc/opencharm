@@ -30,8 +30,16 @@ public struct CanvasLayout: Equatable, Sendable {
         var origin = CGPoint(
             x: CGFloat(settings.webcam.center.x) * canvasSize.width - side / 2,
             y: (1 - CGFloat(settings.webcam.center.y)) * canvasSize.height - side / 2)
-        origin.x = max(0, min(origin.x, canvasSize.width - side))
-        origin.y = max(0, min(origin.y, canvasSize.height - side))
+        // Keep a small breathing margin from the canvas edges (the bubble stays sticky to its
+        // corner, just never flush against the border). Falls back to centering on the axis if
+        // the bubble is too large for any margin.
+        let inset = 0.025 * minDim
+        func clamp(_ v: CGFloat, span: CGFloat) -> CGFloat {
+            let hi = span - side - inset
+            return hi < inset ? (span - side) / 2 : min(max(v, inset), hi)
+        }
+        origin.x = clamp(origin.x, span: canvasSize.width)
+        origin.y = clamp(origin.y, span: canvasSize.height)
 
         return CanvasLayout(
             contentRect: contentRect,
