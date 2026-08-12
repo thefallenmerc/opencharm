@@ -244,7 +244,17 @@ final class StylingModel: ObservableObject {
     }
 
     func togglePlay() {
-        if player.timeControlStatus == .playing { player.pause() } else { player.play() }
+        if player.timeControlStatus == .playing {
+            player.pause()
+            return
+        }
+        // Play from the top when the playhead is parked at (or past) the end of the
+        // playable range — otherwise play resumes into the stop point and does nothing.
+        let end = renderSettings.trimEnd ?? duration
+        if end > 0, currentTime >= end - 0.05 {
+            seek(to: renderSettings.trimStart ?? 0)
+        }
+        player.play()
     }
 
     // MARK: Save as portable .charmproj
