@@ -3,9 +3,10 @@ import RenderCore
 import SwiftUI
 
 /// Screen Charm-style editor strip: transport + time ruler + video track (with trim) + a lane of
-/// gold zoom pills. Two clicks in the zoom lane create a manual zoom; pills are selectable, movable,
-/// and resizable via their chevron end-caps.
-struct StudioTimeline: View {
+/// gold zoom pills. Two clicks in the zoom lane create a manual zoom; pills are selectable,
+/// movable, and resizable via their chevron end-caps. (Ported from the original StudioTimeline —
+/// the gesture/anchor logic is unchanged; only the styling moved to StudioTheme.)
+struct StudioTransport: View {
     @ObservedObject var model: StylingModel
 
     @State private var timelineZoom: Double = 1        // 1 = fit whole clip to width (100%)
@@ -14,7 +15,7 @@ struct StudioTimeline: View {
     @State private var drag: ZoomDragAnchor?           // captured at drag start so deltas don't compound
 
     private let rulerH: CGFloat = 24
-    private let trackH: CGFloat = 40
+    private let trackH: CGFloat = 44
     private let laneH: CGFloat = 38
     private let capW: CGFloat = 16
     private let space = "timeline"
@@ -23,8 +24,7 @@ struct StudioTimeline: View {
     private var trimStart: Double { model.renderSettings.trimStart ?? 0 }
     private var trimEnd: Double { model.renderSettings.trimEnd ?? dur }
 
-    // Palette (matches the reference).
-    private let chip = Color(.sRGB, white: 0.17, opacity: 1)
+    // Track palette (matches the reference).
     private let videoGrad = LinearGradient(
         colors: [Color(.sRGB, red: 0.24, green: 0.34, blue: 0.95, opacity: 1),
                  Color(.sRGB, red: 0.47, green: 0.33, blue: 0.87, opacity: 1)],
@@ -61,52 +61,70 @@ struct StudioTimeline: View {
             }
             .frame(height: rulerH + trackH + laneH + 16)
         }
-        .padding(14)
-        .background(Color.black.opacity(0.92))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(StudioTheme.windowBG)
     }
 
     // MARK: transport row
 
     private var controlRow: some View {
-        HStack(spacing: 14) {
-            HStack(spacing: 10) {
-                Slider(value: $timelineZoom, in: 1...6).frame(width: 150).tint(.white)
-                Text("\(Int(timelineZoom * 100))%")
-                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
-                Button { timelineZoom = 1 } label: {
-                    Image(systemName: "arrow.counterclockwise").font(.system(size: 15, weight: .semibold))
-                }
-                .buttonStyle(.plain).foregroundStyle(.white).help("Reset timeline zoom")
-            }
-            Spacer()
+        ZStack {
+            // Center: time · transport · duration — the focal cluster.
             HStack(spacing: 10) {
                 Text(fmt(model.currentTime))
-                    .font(.system(size: 15, weight: .medium).monospacedDigit()).foregroundStyle(.white)
+                    .font(.system(size: 14, weight: .medium).monospacedDigit())
+                    .foregroundStyle(StudioTheme.textPrimary)
                 transport("backward.end.fill") { model.seek(to: trimStart) }
                 transport(model.isPlaying ? "pause.fill" : "play.fill") { model.togglePlay() }
+                    .keyboardShortcut(.space, modifiers: [])
                 transport("forward.end.fill") { model.seek(to: trimEnd) }
                 Text(fmt(dur))
-                    .font(.system(size: 15, weight: .medium).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.6))
+                    .font(.system(size: 14, weight: .medium).monospacedDigit())
+                    .foregroundStyle(StudioTheme.textSecondary)
             }
-            Spacer()
-            Button {
-                model.renderSettings.trimEnd = model.currentTime; model.applyTrim()
-            } label: {
-                Label("Cut", systemImage: "scissors")
-                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
-                    .padding(.horizontal, 14).frame(height: 40)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(chip))
+            HStack(spacing: 14) {
+                // Left: timeline zoom.
+                HStack(spacing: 8) {
+                    Slider(value: $timelineZoom, in: 1...6)
+                        .frame(width: 130)
+                        .tint(StudioTheme.accent)
+                    Text("\(Int(timelineZoom * 100))%")
+                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(StudioTheme.textSecondary)
+                    Button {
+                        timelineZoom = 1
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(StudioTheme.textSecondary)
+                    .help("Reset timeline zoom")
+                }
+                Spacer()
+                // Right: Cut.
+                Button {
+                    model.renderSettings.trimEnd = model.currentTime
+                    model.applyTrim()
+                } label: {
+                    Label("Cut", systemImage: "scissors")
+                }
+                .buttonStyle(ChipButtonStyle())
+                .help("Trim the end at the playhead")
             }
-            .buttonStyle(.plain).help("Trim the end at the playhead")
         }
     }
 
     private func transport(_ symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
-                .frame(width: 50, height: 40)
-                .background(RoundedRectangle(cornerRadius: 10).fill(chip))
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(StudioTheme.textPrimary)
+                .frame(width: 44, height: 34)
+                .background(RoundedRectangle(cornerRadius: 10).fill(StudioTheme.chipBG))
+                .overlay(RoundedRectangle(cornerRadius: 10)
+                    .stroke(StudioTheme.chipBorder, lineWidth: 1))
         }
         .buttonStyle(.plain)
     }
@@ -115,19 +133,26 @@ struct StudioTimeline: View {
 
     private func zoomEditor(_ spec: ZoomSpec) -> some View {
         HStack(spacing: 12) {
-            Text(String(format: "%.1f× Zoom", spec.scale)).font(.caption).foregroundStyle(.orange)
+            Text(String(format: "%.1f× Zoom", spec.scale))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.orange)
             Slider(value: Binding(get: { spec.scale },
                                   set: { model.setZoomLevel(spec.id, scale: $0) }), in: 1.5...3)
                 .frame(width: 160)
-            Text("\(fmt(spec.start))–\(fmt(spec.end))").font(.caption.monospacedDigit())
-                .foregroundStyle(.white.opacity(0.6))
+                .tint(.orange)
+            Text("\(fmt(spec.start))–\(fmt(spec.end))")
+                .font(.system(size: 12).monospacedDigit())
+                .foregroundStyle(StudioTheme.textSecondary)
             Spacer()
             Button(role: .destructive) {
-                model.deleteZoom(spec.id); selectedID = nil
-            } label: { Label("Delete", systemImage: "trash") }
-                .buttonStyle(.bordered)
+                model.deleteZoom(spec.id)
+                selectedID = nil
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+            .buttonStyle(ChipButtonStyle())
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(StudioTheme.textPrimary)
     }
 
     // MARK: ruler
@@ -139,7 +164,8 @@ struct StudioTimeline: View {
             func tick(_ t: Double, _ h: CGFloat, _ op: Double) {
                 let x = t * pps
                 var p = Path()
-                p.move(to: CGPoint(x: x, y: size.height - h)); p.addLine(to: CGPoint(x: x, y: size.height))
+                p.move(to: CGPoint(x: x, y: size.height - h))
+                p.addLine(to: CGPoint(x: x, y: size.height))
                 ctx.stroke(p, with: .color(.white.opacity(op)), lineWidth: 1)
             }
             var mt = 0.0
@@ -147,7 +173,7 @@ struct StudioTimeline: View {
             var Mt = 0.0
             while Mt <= dur + 1e-6 {
                 tick(Mt, 9, 0.5)
-                ctx.draw(Text(fmt(Mt)).font(.system(size: 11)).foregroundStyle(.white.opacity(0.7)),
+                ctx.draw(Text(fmt(Mt)).font(.system(size: 11)).foregroundStyle(.white.opacity(0.55)),
                          at: CGPoint(x: Mt * pps + 3, y: 6), anchor: .leading)
                 Mt += step
             }
@@ -163,8 +189,8 @@ struct StudioTimeline: View {
         let x0 = trimStart * pps, x1 = trimEnd * pps
         let keptW = max(2 * capW, x1 - x0)
         return ZStack(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: 8).fill(videoCap.opacity(0.14)) // dimmed full clip
-            RoundedRectangle(cornerRadius: 8).fill(videoGrad)
+            RoundedRectangle(cornerRadius: 9).fill(videoCap.opacity(0.14)) // dimmed full clip
+            RoundedRectangle(cornerRadius: 9).fill(videoGrad)
                 .frame(width: keptW).offset(x: x0)
                 .overlay(
                     Label(String(format: "Video: %.1fs", dur), systemImage: "video.fill")
@@ -193,7 +219,8 @@ struct StudioTimeline: View {
     }
 
     private func edgeDrag(_ pps: Double, _ set: @escaping (Double) -> Void) -> some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .named(space)).onChanged { set($0.location.x / pps) }
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(space))
+            .onChanged { set($0.location.x / pps) }
     }
 
     // MARK: zoom lane + tags
@@ -291,7 +318,8 @@ struct StudioTimeline: View {
     private func playhead(pps: Double) -> some View {
         let x = model.currentTime * pps
         return Path { p in
-            p.move(to: CGPoint(x: x, y: 6)); p.addLine(to: CGPoint(x: x, y: rulerH + trackH + laneH + 16))
+            p.move(to: CGPoint(x: x, y: 6))
+            p.addLine(to: CGPoint(x: x, y: rulerH + trackH + laneH + 16))
         }
         .stroke(playheadColor, lineWidth: 2)
         .overlay(RoundedRectangle(cornerRadius: 2).fill(playheadColor)

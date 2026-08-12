@@ -21,8 +21,15 @@ final class StudioWindowController: NSWindowController, NSWindowDelegate {
             backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.title = "OpenCharm Studio"
-        // Fixed 300pt inspector sidebar + a 1pt divider + the 480pt preview minimum.
-        window.minSize = NSSize(width: 820, height: 420)
+        // Dark, Screen Charm-style chrome: the SwiftUI root paints edge-to-edge under a
+        // transparent titlebar; only the traffic lights remain of the system chrome.
+        window.styleMask.insert(.fullSizeContentView)
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = NSColor(red: 0.051, green: 0.051, blue: 0.063, alpha: 1)
+        // 72pt rail + 280pt panel + the 480pt preview minimum + padding.
+        window.minSize = NSSize(width: 1100, height: 640)
         window.center()
         super.init(window: window)
         window.delegate = self
@@ -40,7 +47,7 @@ final class StudioWindowController: NSWindowController, NSWindowDelegate {
             models[package.url] = model
         }
         current = model
-        window?.contentView = NSHostingView(rootView: StylingView(model: model))
+        window?.contentView = NSHostingView(rootView: StudioRootView(model: model))
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
