@@ -35,6 +35,12 @@ public final class Compositor {
 
         var result = backgroundLayer(settings.background, image: inputs.backgroundImage,
                                      canvasRect: canvasRect)
+        if let blur = settings.backgroundBlur, blur > 0.001 {
+            let sigma = blur * 0.04 * min(canvasSize.width, canvasSize.height)
+            result = result.clampedToExtent()
+                .applyingGaussianBlur(sigma: sigma)
+                .cropped(to: canvasRect)
+        }
         if settings.shadow.opacity > 0 {
             result = shadow(for: layout.contentRect, radius: layout.cornerRadius,
                             opacity: settings.shadow.opacity,
@@ -176,8 +182,9 @@ public final class Compositor {
     func webcamLayer(_ webcam: CIImage?, settings: RenderSettings,
                      layout: CanvasLayout, over background: CIImage) -> CIImage {
         guard settings.webcam.visible, let webcam else { return background }
-        // Center-crop to square.
+        // Center-crop to square; contentZoom > 1 tightens the crop for a closer face framing.
         let side = min(webcam.extent.width, webcam.extent.height)
+            / max(1, settings.webcam.contentZoom ?? 1)
         let crop = CGRect(x: webcam.extent.midX - side / 2,
                           y: webcam.extent.midY - side / 2, width: side, height: side)
         let square = webcam.cropped(to: crop)

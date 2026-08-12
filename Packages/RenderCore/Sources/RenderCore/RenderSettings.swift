@@ -32,8 +32,13 @@ public struct WebcamSettings: Codable, Equatable, Sendable {
     public var size: Double
     /// 0 = square-ish rounded rect, 1 = circle. cornerRadius = roundness * side/2.
     public var roundness: Double
-    public init(visible: Bool, center: CGPoint, size: Double, roundness: Double) {
+    /// Crop-zoom inside the bubble (1–2): 2 shows the center half of the webcam frame — a tighter
+    /// face framing. Additive/optional: `nil` = 1 (no crop).
+    public var contentZoom: Double?
+    public init(visible: Bool, center: CGPoint, size: Double, roundness: Double,
+                contentZoom: Double? = nil) {
         (self.visible, self.center, self.size, self.roundness) = (visible, center, size, roundness)
+        self.contentZoom = contentZoom
     }
 }
 
@@ -93,13 +98,16 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     /// Global playback speed (0.5–2). Preview plays at this rate; export retimes the composition.
     /// Additive/optional: `nil` = 1 (real time).
     public var playbackSpeed: Double?
+    /// Background softening, 0–1 (maps to a Gaussian sigma of 4% of the canvas min dimension at 1).
+    /// Additive/optional: `nil` = 0 (sharp).
+    public var backgroundBlur: Double?
 
     public init(background: Background, paddingFraction: Double, cornerRadiusFraction: Double,
                 shadow: ShadowSettings, webcam: WebcamSettings,
                 autoZoom: AutoZoomSettings? = nil,
                 zooms: [ZoomSpec]? = nil, trimStart: Double? = nil, trimEnd: Double? = nil,
                 cursorSize: Double? = nil, aspect: AspectPreset? = nil,
-                playbackSpeed: Double? = nil) {
+                playbackSpeed: Double? = nil, backgroundBlur: Double? = nil) {
         self.background = background
         self.paddingFraction = paddingFraction
         self.cornerRadiusFraction = cornerRadiusFraction
@@ -112,6 +120,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         self.cursorSize = cursorSize
         self.aspect = aspect
         self.playbackSpeed = playbackSpeed
+        self.backgroundBlur = backgroundBlur
     }
 
     public static let `default` = RenderSettings(
