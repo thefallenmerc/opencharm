@@ -15,7 +15,8 @@ public enum ProjectCompositionBuilder {
                              backgroundImage: CIImage?,
                              clicks: [ClickEvent] = [],
                              cursorSamples: [CursorSample] = [],
-                             cursorImage: CIImage? = nil) async throws -> BuiltComposition {
+                             cursorImage: CIImage? = nil,
+                             retimeForExport: Bool = false) async throws -> BuiltComposition {
         let composition = AVMutableComposition()
 
         func addVideo(_ track: MediaTimeline.VideoTrack) async throws -> CMPersistentTrackID {
@@ -52,20 +53,32 @@ public enum ProjectCompositionBuilder {
             mixParams.append(params)
         }
 
+        // Playback speed: preview leaves the composition at 1x (AVPlayer.defaultRate handles it);
+        // export bakes the retiming in, so every time-domain input scales with it.
+        let speed = settings.playbackSpeed ?? 1
+        var zoomSegments = settings.zooms.map { $0.map(\.segment) }
+            ?? AutoZoom.segments(clicks: clicks, settings: settings.autoZoom ?? .default)
+        var samples = cursorSamples
+        if retimeForExport, abs(speed - 1) > 0.001 {
+            let full = CMTimeRange(start: .zero, duration: composition.duration)
+            composition.scaleTimeRange(
+                full,
+                toDuration: CMTime(seconds: full.duration.seconds / speed,
+                                   preferredTimescale: 600))
+            zoomSegments = zoomSegments.map { $0.scaled(by: 1 / speed) }
+            samples = samples.map { CursorSample(time: $0.time / speed, point: $0.point) }
+        }
+
         let videoComposition = AVMutableVideoComposition()
         videoComposition.customVideoCompositorClass = CharmVideoCompositor.self
         videoComposition.renderSize = canvasSize
         videoComposition.frameDuration = CMTime(value: 1, timescale: 60)
-        // Prefer the materialized, user-editable timeline zooms; fall back to computing from clicks
-        // for callers that haven't seeded `settings.zooms` yet.
-        let zoomSegments = settings.zooms.map { $0.map(\.segment) }
-            ?? AutoZoom.segments(clicks: clicks, settings: settings.autoZoom ?? .default)
         videoComposition.instructions = [CharmInstruction(
             timeRange: CMTimeRange(start: .zero, duration: composition.duration),
             screenTrackID: screenID, webcamTrackID: webcamID,
             settings: settings, backgroundImage: backgroundImage,
             zoomSegments: zoomSegments,
-            cursorSamples: cursorSamples, cursorImage: cursorImage,
+            cursorSamples: samples, cursorImage: cursorImage,
             cursorSize: settings.cursorSize ?? 0.04)]
 
         var audioMix: AVAudioMix?

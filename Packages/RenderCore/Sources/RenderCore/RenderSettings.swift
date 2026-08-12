@@ -90,12 +90,16 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     public var cursorSize: Double?
     /// Output canvas aspect preset. Additive/optional: `nil` = `.auto` (match the recording).
     public var aspect: AspectPreset?
+    /// Global playback speed (0.5–2). Preview plays at this rate; export retimes the composition.
+    /// Additive/optional: `nil` = 1 (real time).
+    public var playbackSpeed: Double?
 
     public init(background: Background, paddingFraction: Double, cornerRadiusFraction: Double,
                 shadow: ShadowSettings, webcam: WebcamSettings,
                 autoZoom: AutoZoomSettings? = nil,
                 zooms: [ZoomSpec]? = nil, trimStart: Double? = nil, trimEnd: Double? = nil,
-                cursorSize: Double? = nil, aspect: AspectPreset? = nil) {
+                cursorSize: Double? = nil, aspect: AspectPreset? = nil,
+                playbackSpeed: Double? = nil) {
         self.background = background
         self.paddingFraction = paddingFraction
         self.cornerRadiusFraction = cornerRadiusFraction
@@ -107,6 +111,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         self.trimEnd = trimEnd
         self.cursorSize = cursorSize
         self.aspect = aspect
+        self.playbackSpeed = playbackSpeed
     }
 
     public static let `default` = RenderSettings(

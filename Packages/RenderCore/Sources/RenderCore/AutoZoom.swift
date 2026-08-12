@@ -61,6 +61,15 @@ public struct ZoomSegment: Equatable, Sendable {
     }
 
     public var focus: CGPoint { focusKeys.first?.point ?? CGPoint(x: 0.5, y: 0.5) }
+
+    /// Maps every time-domain value into a retimed composition (factor = 1/speed). Magnification
+    /// and focus geometry are untouched.
+    public func scaled(by factor: Double) -> ZoomSegment {
+        ZoomSegment(start: start * factor, end: end * factor,
+                    easeIn: easeIn * factor, easeOut: easeOut * factor,
+                    scale: scale,
+                    focusKeys: focusKeys.map { FocusKey(time: $0.time * factor, point: $0.point) })
+    }
 }
 
 /// A persisted, user-editable zoom on the timeline. Auto-generated ones are seeded from clicks

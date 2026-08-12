@@ -65,19 +65,25 @@ public final class ProjectExporter {
         // expensive) composition build at all.
         if wasCancelled { throw ExportError.cancelled }
 
-        let canvasSize = Self.pixelSize(for: request.resolution, sourceCanvas: sourceCanvasSize)
+        // Aspect preset first (it reshapes the canvas), then the resolution preset maps it to pixels.
+        let aspectCanvas = (settings.aspect ?? .auto).canvasSize(for: sourceCanvasSize)
+        let canvasSize = Self.pixelSize(for: request.resolution, sourceCanvas: aspectCanvas)
         let built = try await ProjectCompositionBuilder.build(
             timeline: timeline, settings: settings, canvasSize: canvasSize,
             backgroundImage: backgroundImage, clicks: clicks,
-            cursorSamples: cursorSamples, cursorImage: cursorImage)
+            cursorSamples: cursorSamples, cursorImage: cursorImage,
+            retimeForExport: true)
         let duration = built.composition.duration.seconds
 
         try? FileManager.default.removeItem(at: request.outputURL)
         let reader = try AVAssetReader(asset: built.composition)
-        // Trim: export only the kept range (segment/zoom times stay absolute on the composition clock).
+        // Trim: export only the kept range (segment/zoom times stay absolute on the composition
+        // clock). Trim points were authored on the 1x preview timeline; the export composition is
+        // retimed, so they scale by 1/speed here.
         if settings.trimStart != nil || settings.trimEnd != nil {
-            let start = settings.trimStart ?? 0
-            let end = settings.trimEnd ?? built.composition.duration.seconds
+            let speed = settings.playbackSpeed ?? 1
+            let start = (settings.trimStart ?? 0) / speed
+            let end = settings.trimEnd.map { $0 / speed } ?? built.composition.duration.seconds
             reader.timeRange = CMTimeRange(
                 start: CMTime(seconds: start, preferredTimescale: 600),
                 end: CMTime(seconds: max(start, end), preferredTimescale: 600))
@@ -95,6 +101,8 @@ public final class ProjectExporter {
                 AVFormatIDKey: kAudioFormatLinearPCM,
             ])
             out.audioMix = built.audioMix
+            // Retimed exports (playback speed ≠ 1) keep the voice's pitch.
+            out.audioTimePitchAlgorithm = .timeDomain
             reader.add(out)
             audioOut = out
         }
