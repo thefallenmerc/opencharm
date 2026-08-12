@@ -43,17 +43,18 @@ struct DockView: View {
     private func recordingBar(since start: Date) -> some View {
         // The red dot is the Stop button (a Button consumes the mouse-down, so clicking it never
         // drags the panel); the timer is inert, so grabbing it drags the pill via the panel's
-        // isMovableByWindowBackground. On hover the dot shows a stop square so it reads as clickable.
+        // isMovableByWindowBackground. On hover a soft red rounded backdrop appears behind the
+        // dot so it reads as clickable.
         HStack(spacing: 12) {
             Button {
                 Task { await model.stopRecording() }
             } label: {
                 ZStack {
-                    Circle().fill(Color.red).frame(width: 11, height: 11)
                     if hoveringStop {
-                        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                            .fill(Color.white).frame(width: 5, height: 5)
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.red.opacity(0.35))
                     }
+                    Circle().fill(Color.red).frame(width: 11, height: 11)
                 }
                 .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
