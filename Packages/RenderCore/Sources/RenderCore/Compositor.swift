@@ -205,15 +205,26 @@ public final class Compositor {
                           y: webcam.extent.midY - side / 2, width: side, height: side)
         let square = webcam.cropped(to: crop)
         var result = background
+        let rect = layout.webcamRect
+        let mask = squircleMask(rect: rect, roundness: settings.webcam.roundness)
+        // Elegant drop shadow under the bubble: the squircle's own silhouette (so the shape
+        // always matches, circle or squircle), softly blurred with a slight downward offset.
         if settings.shadow.opacity > 0 {
-            result = shadow(for: layout.webcamRect, radius: layout.webcamCornerRadius,
-                            opacity: settings.shadow.opacity * 0.6,
-                            blurSigma: layout.shadowBlurSigma * 0.6,
-                            offsetY: layout.shadowOffsetY * 0.6)
-                .composited(over: result)
+            let sigma = max(3, rect.width * 0.045)
+            let silhouette = mask.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+                "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+                "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: settings.shadow.opacity * 0.55),
+            ])
+            let dropShadow = silhouette
+                .transformed(by: .init(translationX: 0, y: -rect.width * 0.03)) // y-up: downward
+                .clampedToExtent()
+                .applyingGaussianBlur(sigma: sigma)
+                .cropped(to: rect.insetBy(dx: -4 * sigma, dy: -4 * sigma))
+            result = dropShadow.composited(over: result)
         }
         // Squircle bubble: continuous icon-like corners (superellipse), not a plain rounded rect.
-        let rect = layout.webcamRect
         let sx = rect.width / square.extent.width
         let sy = rect.height / square.extent.height
         let placed = square
@@ -223,7 +234,7 @@ public final class Compositor {
         let blend = CIFilter.blendWithMask()
         blend.inputImage = placed
         blend.backgroundImage = result
-        blend.maskImage = squircleMask(rect: rect, roundness: settings.webcam.roundness)
+        blend.maskImage = mask
         return blend.outputImage!
     }
 

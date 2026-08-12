@@ -26,7 +26,10 @@ final class SelfViewWindow: NSPanel {
         let view = NSView(frame: NSRect(x: 0, y: 0, width: size, height: size))
         view.wantsLayer = true
         previewLayer.frame = view.bounds
-        previewLayer.cornerRadius = size / 2
+        // Same squircle as the composited bubble (default roundness 0.65 → radius 0.325 × side);
+        // .continuous gives the icon-like corner curvature, not a plain rounded rect.
+        previewLayer.cornerRadius = size * 0.325
+        previewLayer.cornerCurve = .continuous
         previewLayer.masksToBounds = true
         previewLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         view.layer = CALayer()
@@ -40,7 +43,8 @@ final class SelfViewWindow: NSPanel {
         guard let view = contentView else { return }
         view.layer?.sublayers?.forEach { $0.removeFromSuperlayer() }
         layer.frame = view.bounds
-        layer.cornerRadius = view.bounds.width / 2
+        layer.cornerRadius = view.bounds.width * 0.325
+        layer.cornerCurve = .continuous
         layer.masksToBounds = true
         layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         view.layer?.addSublayer(layer)
