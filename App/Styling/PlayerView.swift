@@ -71,6 +71,15 @@ struct WebcamDragOverlay: View {
                             let ny = (v.location.y - origin.y) / shown.height // top-left, matches settings
                             model.renderSettings.webcam.center = CGPoint(
                                 x: min(1, max(0, nx)), y: min(1, max(0, ny)))
+                        }
+                        .onEnded { _ in
+                            // The bubble lives in a corner: on release it snaps to the layout
+                            // corner of whichever quadrant it was dropped in.
+                            guard model.renderSettings.webcam.visible else { return }
+                            let c = model.renderSettings.webcam.center
+                            model.renderSettings.webcam.center = CGPoint(
+                                x: c.x < 0.5 ? 0.13 : 0.87,
+                                y: c.y < 0.5 ? 0.18 : 0.82)
                         })
 
                 // Corner handles resize the bubble (they sit on top, so grabbing a corner resizes

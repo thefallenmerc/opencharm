@@ -61,6 +61,24 @@ public enum ProjectCompositionBuilder {
             ?? AutoZoom.segments(clicks: clicks, settings: settings.autoZoom ?? .default)
         var samples = cursorSamples
         var clickTimes = clicks.map(\.time).sorted()
+
+        // Deleted segments: preview keeps the full composition (playback skips them); export
+        // removes them for real, shifting every time-domain input onto the edited clock.
+        let cuts = CutClock.normalized(settings.cuts ?? [],
+                                       duration: composition.duration.seconds)
+        if retimeForExport, !cuts.isEmpty {
+            for cut in cuts.reversed() {
+                composition.removeTimeRange(CMTimeRange(
+                    start: CMTime(seconds: cut.start, preferredTimescale: 600),
+                    end: CMTime(seconds: cut.end, preferredTimescale: 600)))
+            }
+            zoomSegments = zoomSegments.compactMap { CutClock.remap($0, cuts: cuts) }
+            samples = samples.map {
+                CursorSample(time: CutClock.map($0.time, cuts: cuts), point: $0.point,
+                             cursorType: $0.cursorType)
+            }
+            clickTimes = clickTimes.map { CutClock.map($0, cuts: cuts) }
+        }
         if retimeForExport, abs(speed - 1) > 0.001 {
             let full = CMTimeRange(start: .zero, duration: composition.duration)
             composition.scaleTimeRange(

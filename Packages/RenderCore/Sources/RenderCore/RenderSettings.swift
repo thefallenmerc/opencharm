@@ -101,13 +101,20 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     /// Background softening, 0–1 (maps to a Gaussian sigma of 4% of the canvas min dimension at 1).
     /// Additive/optional: `nil` = 0 (sharp).
     public var backgroundBlur: Double?
+    /// Split points on the timeline (original-composition seconds) — segment boundaries the user
+    /// created with Cut. Additive/optional.
+    public var splits: [Double]?
+    /// Deleted segments (original-composition seconds). Preview skips them; export removes them.
+    /// Additive/optional.
+    public var cuts: [CutRange]?
 
     public init(background: Background, paddingFraction: Double, cornerRadiusFraction: Double,
                 shadow: ShadowSettings, webcam: WebcamSettings,
                 autoZoom: AutoZoomSettings? = nil,
                 zooms: [ZoomSpec]? = nil, trimStart: Double? = nil, trimEnd: Double? = nil,
                 cursorSize: Double? = nil, aspect: AspectPreset? = nil,
-                playbackSpeed: Double? = nil, backgroundBlur: Double? = nil) {
+                playbackSpeed: Double? = nil, backgroundBlur: Double? = nil,
+                splits: [Double]? = nil, cuts: [CutRange]? = nil) {
         self.background = background
         self.paddingFraction = paddingFraction
         self.cornerRadiusFraction = cornerRadiusFraction
@@ -121,6 +128,8 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         self.aspect = aspect
         self.playbackSpeed = playbackSpeed
         self.backgroundBlur = backgroundBlur
+        self.splits = splits
+        self.cuts = cuts
     }
 
     public static let `default` = RenderSettings(

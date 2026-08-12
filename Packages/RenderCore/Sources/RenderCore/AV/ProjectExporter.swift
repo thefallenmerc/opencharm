@@ -82,12 +82,15 @@ public final class ProjectExporter {
         try? FileManager.default.removeItem(at: request.outputURL)
         let reader = try AVAssetReader(asset: built.composition)
         // Trim: export only the kept range (segment/zoom times stay absolute on the composition
-        // clock). Trim points were authored on the 1x preview timeline; the export composition is
-        // retimed, so they scale by 1/speed here.
+        // clock). Trim points were authored on the 1x, uncut preview timeline; the export
+        // composition has cuts removed and is retimed, so they map through the cuts and scale
+        // by 1/speed here.
         if settings.trimStart != nil || settings.trimEnd != nil {
             let speed = settings.playbackSpeed ?? 1
-            let start = (settings.trimStart ?? 0) / speed
-            let end = settings.trimEnd.map { $0 / speed } ?? built.composition.duration.seconds
+            let cuts = CutClock.normalized(settings.cuts ?? [], duration: .greatestFiniteMagnitude)
+            let start = CutClock.map(settings.trimStart ?? 0, cuts: cuts) / speed
+            let end = settings.trimEnd.map { CutClock.map($0, cuts: cuts) / speed }
+                ?? built.composition.duration.seconds
             reader.timeRange = CMTimeRange(
                 start: CMTime(seconds: start, preferredTimescale: 600),
                 end: CMTime(seconds: max(start, end), preferredTimescale: 600))

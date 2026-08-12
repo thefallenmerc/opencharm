@@ -68,7 +68,10 @@ final class StylingModel: ObservableObject {
         self.audioSettings = package.manifest.audioSettings
         timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] t in
-            MainActor.assumeIsolated { self?.currentTime = t.seconds }
+            MainActor.assumeIsolated {
+                self?.currentTime = t.seconds
+                self?.skipDeletedSegmentIfNeeded()
+            }
         }
         player.publisher(for: \.timeControlStatus)
             .map { $0 == .playing }
@@ -232,6 +235,73 @@ final class StylingModel: ObservableObject {
                     manual: false)
             : []
         renderSettings.zooms = (manual + auto).sorted { $0.start < $1.start }
+    }
+
+    // MARK: Split segments (Cut)
+
+    /// One timeline segment between split boundaries. `deleted` segments are skipped in preview
+    /// and removed on export.
+    struct TimelineSegment: Identifiable, Equatable {
+        let id: Int
+        let start: Double
+        let end: Double
+        let deleted: Bool
+    }
+
+    private var normalizedCuts: [CutRange] {
+        CutClock.normalized(renderSettings.cuts ?? [], duration: max(duration, 0.1))
+    }
+
+    /// Segments between consecutive split boundaries, in timeline order.
+    var timelineSegments: [TimelineSegment] {
+        let dur = max(duration, 0.1)
+        let bounds = ([0.0] + (renderSettings.splits ?? []).filter { $0 > 0.05 && $0 < dur - 0.05 }
+            + [dur]).sorted()
+        let cuts = normalizedCuts
+        return zip(bounds, bounds.dropFirst()).enumerated().compactMap { i, pair in
+            let (a, b) = pair
+            guard b - a > 0.05 else { return nil }
+            let mid = (a + b) / 2
+            let deleted = cuts.contains { mid >= $0.start && mid <= $0.end }
+            return TimelineSegment(id: i, start: a, end: b, deleted: deleted)
+        }
+    }
+
+    /// Splits the video at the playhead (the timeline's scissor button).
+    func splitAtPlayhead() {
+        let t = currentTime
+        guard t > 0.1, t < duration - 0.1 else { return }
+        var splits = renderSettings.splits ?? []
+        guard !splits.contains(where: { abs($0 - t) < 0.05 }) else { return }
+        splits.append(t)
+        renderSettings.splits = splits.sorted()
+    }
+
+    /// Deletes a kept segment / restores a deleted one.
+    func toggleSegmentDeleted(_ segment: TimelineSegment) {
+        var cuts = normalizedCuts
+        if segment.deleted {
+            // Restore: subtract this segment's range from any overlapping cut.
+            cuts = cuts.flatMap { cut -> [CutRange] in
+                guard cut.start < segment.end, cut.end > segment.start else { return [cut] }
+                var pieces: [CutRange] = []
+                if cut.start < segment.start { pieces.append(CutRange(start: cut.start, end: segment.start)) }
+                if cut.end > segment.end { pieces.append(CutRange(start: segment.end, end: cut.end)) }
+                return pieces
+            }
+        } else {
+            cuts.append(CutRange(start: segment.start, end: segment.end))
+        }
+        renderSettings.cuts = CutClock.normalized(cuts, duration: max(duration, 0.1))
+    }
+
+    /// While playing, jump over deleted segments (export removes them for real; the preview
+    /// composition keeps the full clip so the timeline clock stays the original one).
+    private func skipDeletedSegmentIfNeeded() {
+        guard isPlaying else { return }
+        if let cut = normalizedCuts.first(where: { currentTime >= $0.start && currentTime < $0.end - 0.05 }) {
+            seek(to: cut.end)
+        }
     }
 
     /// Seeks the player, clamped to the trimmed range when set.
@@ -405,7 +475,15 @@ final class StylingModel: ObservableObject {
         let rate = Float(renderSettings.playbackSpeed ?? 1)
         player.defaultRate = rate
         if isPlaying, abs(player.rate - rate) > 0.001 { player.rate = rate }
-        rebuildVideoComposition()
+        if old.aspect != renderSettings.aspect {
+            // A render-size change doesn't take effect on a live AVPlayerItem — swapping just the
+            // videoComposition leaves the player displaying at the old aspect (cropped/stretched).
+            // The item must be rebuilt around the new canvas.
+            audioDebounce?.cancel()
+            audioDebounce = Task { [weak self] in await self?.rebuildComposition() }
+        } else {
+            rebuildVideoComposition()
+        }
         persist()
     }
 

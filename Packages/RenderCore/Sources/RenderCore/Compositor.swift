@@ -57,10 +57,12 @@ public final class Compositor {
                              canvasRect: canvasRect)
 
         // The webcam floats above the zoom (it never magnifies), shrinking while zoomed in so
-        // it stays unobtrusive over the magnified content (matches the reference).
+        // it stays unobtrusive over the magnified content (matches the reference). It shrinks
+        // toward the canvas corner it lives in — outer edges pinned — so it stays tucked in its
+        // corner instead of drifting toward the middle.
         if zoom.progress > 0 {
             let f = CGFloat(1 - 0.5 * min(max(zoom.progress, 0), 1)) // half size at full zoom
-            layout.webcamRect = shrink(layout.webcamRect, by: f)
+            layout.webcamRect = shrinkAnchored(layout.webcamRect, by: f, canvas: canvasSize)
             layout.webcamCornerRadius *= f
         }
         var result = webcamLayer(inputs.webcam, settings: settings, layout: layout, over: stage)
@@ -116,10 +118,13 @@ public final class Compositor {
         return positioned.composited(over: dropShadow.composited(over: bg))
     }
 
-    /// Scales a rect about its center by `f` (used to shrink the webcam bubble during zoom).
-    private func shrink(_ rect: CGRect, by f: CGFloat) -> CGRect {
+    /// Scales a rect by `f`, keeping the edges nearest the canvas corner fixed — a corner bubble
+    /// shrinks INTO its corner rather than floating toward the canvas center.
+    private func shrinkAnchored(_ rect: CGRect, by f: CGFloat, canvas: CGSize) -> CGRect {
         let w = rect.width * f, h = rect.height * f
-        return CGRect(x: rect.midX - w / 2, y: rect.midY - h / 2, width: w, height: h)
+        let x = rect.midX < canvas.width / 2 ? rect.minX : rect.maxX - w
+        let y = rect.midY < canvas.height / 2 ? rect.minY : rect.maxY - h // y-up: minY = bottom
+        return CGRect(x: x, y: y, width: w, height: h)
     }
 
     // MARK: layers

@@ -12,6 +12,7 @@ struct StudioTransport: View {
     @State private var timelineZoom: Double = 1        // 1 = fit whole clip to width (100%)
     @State private var pendingStart: Double?           // first click of a two-click zoom
     @State private var selectedID: String?
+    @State private var selectedSegmentID: Int?         // selected split segment (delete/restore)
     @State private var drag: ZoomDragAnchor?           // captured at drag start so deltas don't compound
 
     private let rulerH: CGFloat = 24
@@ -42,6 +43,10 @@ struct StudioTransport: View {
             controlRow
             if let id = selectedID, let spec = model.zooms.first(where: { $0.id == id }) {
                 zoomEditor(spec)
+            }
+            if let sid = selectedSegmentID,
+               let seg = model.timelineSegments.first(where: { $0.id == sid }) {
+                segmentEditor(seg)
             }
             GeometryReader { geo in
                 let pps = (geo.size.width / dur) * timelineZoom
@@ -103,15 +108,14 @@ struct StudioTransport: View {
                     .help("Reset timeline zoom")
                 }
                 Spacer()
-                // Right: Cut.
+                // Right: Cut splits the video at the playhead into segments.
                 Button {
-                    model.renderSettings.trimEnd = model.currentTime
-                    model.applyTrim()
+                    model.splitAtPlayhead()
                 } label: {
                     Label("Cut", systemImage: "scissors")
                 }
                 .buttonStyle(ChipButtonStyle())
-                .help("Trim the end at the playhead")
+                .help("Split at the playhead — select a segment to delete it")
             }
         }
     }
@@ -183,20 +187,40 @@ struct StudioTransport: View {
         .gesture(scrub(pps: pps))
     }
 
-    // MARK: video track + trim
+    // MARK: video track + trim + split segments
 
     private func track(pps: Double) -> some View {
         let x0 = trimStart * pps, x1 = trimEnd * pps
-        let keptW = max(2 * capW, x1 - x0)
+        let segments = model.timelineSegments
+        let widestKept = segments.filter { !$0.deleted }
+            .max { ($0.end - $0.start) < ($1.end - $1.start) }?.id
         return ZStack(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: 9).fill(videoCap.opacity(0.14)) // dimmed full clip
-            RoundedRectangle(cornerRadius: 9).fill(videoGrad)
-                .frame(width: keptW).offset(x: x0)
-                .overlay(
-                    Label(String(format: "Video: %.1fs", dur), systemImage: "video.fill")
-                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
-                        .frame(width: keptW).offset(x: x0)
-                )
+            RoundedRectangle(cornerRadius: 9).fill(videoCap.opacity(0.10)) // track bed
+            ForEach(segments) { seg in
+                let sx = seg.start * pps
+                let w = max(8, (seg.end - seg.start) * pps - 2)
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(videoGrad)
+                    .frame(width: w, height: trackH)
+                    .opacity(seg.deleted ? 0.18 : 1)
+                    .overlay {
+                        if seg.deleted {
+                            Image(systemName: "trash")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.6))
+                        } else if seg.id == widestKept, w > 110 {
+                            Label(String(format: "Video: %.1fs", dur), systemImage: "video.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .overlay(RoundedRectangle(cornerRadius: 8)
+                        .stroke(.white, lineWidth: selectedSegmentID == seg.id ? 2 : 0))
+                    .offset(x: sx + 1)
+                    .onTapGesture {
+                        selectedSegmentID = selectedSegmentID == seg.id ? nil : seg.id
+                    }
+            }
             endCap(pointsLeft: true, fill: videoCap, height: trackH).offset(x: x0)
                 .gesture(edgeDrag(pps) { model.renderSettings.trimStart = min(max(0, $0), trimEnd - 0.1)
                                         model.applyTrim() })
@@ -209,13 +233,43 @@ struct StudioTransport: View {
         .gesture(scrub(pps: pps))
     }
 
-    /// A lighter, chevron-pointed cap at a bar's end — the drag handle for trim/resize.
+    private func segmentEditor(_ seg: StylingModel.TimelineSegment) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "film")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(StudioTheme.textSecondary)
+            Text("Segment \(fmt(seg.start))–\(fmt(seg.end))")
+                .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                .foregroundStyle(StudioTheme.textPrimary)
+            if seg.deleted {
+                Text("deleted — skipped in playback and export")
+                    .font(.system(size: 11))
+                    .foregroundStyle(StudioTheme.textSecondary)
+            }
+            Spacer()
+            Button {
+                model.toggleSegmentDeleted(seg)
+            } label: {
+                Label(seg.deleted ? "Restore" : "Delete",
+                      systemImage: seg.deleted ? "arrow.uturn.backward" : "trash")
+            }
+            .buttonStyle(ChipButtonStyle())
+        }
+    }
+
+    /// The rounded, inset handle at a bar's end — softer than a full-height arrowhead, matching
+    /// the reference's pill caps. Hit area spans the full cap width.
     private func endCap(pointsLeft: Bool, fill: Color, height: CGFloat) -> some View {
-        ArrowCap(pointsLeft: pointsLeft).fill(fill)
-            .overlay(Image(systemName: pointsLeft ? "chevron.compact.left" : "chevron.compact.right")
-                .font(.system(size: 13, weight: .bold)).foregroundStyle(.black.opacity(0.35)))
-            .frame(width: capW, height: height)
-            .contentShape(Rectangle())
+        ZStack {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(fill)
+                .frame(width: 11, height: height - 8)
+            Image(systemName: pointsLeft ? "chevron.compact.left" : "chevron.compact.right")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.black.opacity(0.4))
+        }
+        .frame(width: capW, height: height)
+        .contentShape(Rectangle())
     }
 
     private func edgeDrag(_ pps: Double, _ set: @escaping (Double) -> Void) -> some Gesture {
@@ -343,26 +397,6 @@ struct StudioTransport: View {
     private func fmt(_ s: Double) -> String {
         let v = max(0, Int(s.rounded()))
         return String(format: "%d:%02d", v / 60, v % 60)
-    }
-}
-
-/// A bar end-cap pointed outward like a chevron/arrowhead.
-private struct ArrowCap: Shape {
-    var pointsLeft: Bool
-    func path(in r: CGRect) -> Path {
-        Path { p in
-            let round: CGFloat = 3
-            if pointsLeft {
-                p.move(to: CGPoint(x: r.maxX, y: r.minY))
-                p.addLine(to: CGPoint(x: r.minX + round, y: r.midY))
-                p.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
-            } else {
-                p.move(to: CGPoint(x: r.minX, y: r.minY))
-                p.addLine(to: CGPoint(x: r.maxX - round, y: r.midY))
-                p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
-            }
-            p.closeSubpath()
-        }
     }
 }
 
