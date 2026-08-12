@@ -1,6 +1,6 @@
 PACKAGES = RenderCore AudioPipeline ProjectStore Recording
 
-.PHONY: fetch-model gen build test format
+.PHONY: fetch-model gen build test format dist
 
 # Downloads + checksum-verifies the RNNoise model weights (rnnoise_data.c,
 # ~74 MB, not committed to git). Idempotent: no-ops if already present and
@@ -22,3 +22,7 @@ test: fetch-model
 
 format:
 	swiftformat .
+
+# Release build copied to dist/OpenCharm.app.
+dist:
+	Tools/build-dist.sh
