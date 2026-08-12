@@ -51,3 +51,22 @@ Capture cannot run on CI — walk this list on real hardware.
     restores the project (zooms/trim/webcam/audio). Close it unedited → no prompt.
     Edit again → ⌘S updates the same file (no panel). Quit with an unsaved recording →
     prompt (Cancel keeps the app running).
+13. Redesigned Studio chrome (Screen Charm-style): the Studio opens as a dark
+    edge-to-edge window — traffic lights over the toolbar, project name + faded
+    ".charmproj" centered (an "Edited" dot appears after a change), folder/undo/redo
+    icons on the left, New recording + purple Export chips on the right. The left
+    icon rail switches General / Cursor / Sound / Camera panels.
+14. General panel: camera-layout thumbnails move/hide the bubble; Aspect Ratio chips
+    (Auto/16:9/4:3/1:1/9:16) reshape the preview canvas immediately and the export
+    matches; wallpaper thumbnails, gradient swatches, color picker, Pick random and
+    Upload custom all change the background; Background blur softens it; Playback
+    Speed chips change preview tempo (voice pitch preserved) and the export duration
+    scales (zooms/trim still line up); Zoom Level sets new/auto zoom magnification.
+15. Undo/redo: after several edits, ⌘Z steps back through them one by one (a slider
+    drag counts as ONE step), ⇧⌘Z re-applies; the toolbar arrows enable/disable to
+    match; timeline zoom edits and Cut are undoable too.
+16. Smooth zoom: with auto-zoom on, the zoom-in has no kick at start/end (spring
+    settle), rapid nearby clicks cause no jitter, and a far click makes the view
+    glide (never snap) with the magnification held — shake-free in preview AND export.
+17. Camera panel: Content zoom tightens the face crop inside the bubble; position
+    chips move it corner to corner.
