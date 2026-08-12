@@ -9,8 +9,8 @@ import UniformTypeIdentifiers
 
 @MainActor
 final class StylingModel: ObservableObject {
-    @Published var renderSettings: RenderSettings { didSet { renderSettingsChanged() } }
-    @Published var audioSettings: AudioSettings { didSet { audioSettingsChanged() } }
+    @Published var renderSettings: RenderSettings { didSet { renderSettingsChanged(old: oldValue) } }
+    @Published var audioSettings: AudioSettings { didSet { audioSettingsChanged(old: oldValue) } }
     @Published var processingAudio = false
     @Published var errorMessage: String?
     @Published var showExport = false // Task 19 attaches the sheet
@@ -25,6 +25,8 @@ final class StylingModel: ObservableObject {
     /// The `.charmproj` this project was last saved to / opened from (nil = never saved to a chosen
     /// location, e.g. a fresh recording).
     @Published private(set) var savedArchiveURL: URL?
+    @Published private(set) var canUndo = false
+    @Published private(set) var canRedo = false
 
     /// Whether closing/quitting should prompt to save: unsaved edits, or never saved to a location.
     var needsSavePrompt: Bool { savedArchiveURL == nil || hasUnsavedChanges }
@@ -32,6 +34,10 @@ final class StylingModel: ObservableObject {
     let player = AVPlayer()
     private(set) var package: ProjectPackage
     private(set) var sourceCanvasSize = CGSize(width: 1920, height: 1080)
+    /// The output canvas: the recording's size, extended per the aspect preset.
+    var canvasSize: CGSize {
+        (renderSettings.aspect ?? .auto).canvasSize(for: sourceCanvasSize)
+    }
     /// Recorded clicks mapped to normalized screen space, loaded once. Used to seed auto-zooms.
     private(set) var autoZoomClicks: [ClickEvent] = []
     /// All pointer samples (moves + clicks), for focusing a manual zoom on the cursor location.
@@ -190,7 +196,7 @@ final class StylingModel: ObservableObject {
         let lo = max(0, min(start, end)), hi = min(max(duration, 0.3), max(start, end))
         let spec = ZoomSpec(id: UUID().uuidString, start: lo, end: max(lo + 0.3, hi),
                             easeIn: 0.4, easeOut: 0.5, focus: focus(in: lo, end: hi),
-                            scale: 2.0, manual: true)
+                            scale: renderSettings.autoZoom?.level ?? 2.0, manual: true)
         renderSettings.zooms = (zooms + [spec]).sorted { $0.start < $1.start }
         return spec
     }
@@ -299,7 +305,7 @@ final class StylingModel: ObservableObject {
             let cacheDir = package.cacheDir
             let audio = audioSettings
             let settings = renderSettings
-            let canvas = sourceCanvasSize
+            let canvas = canvasSize
             let bg = resolvedBackgroundImage()
             let clicks = autoZoomClicks
             let timeline = try await Task.detached {
@@ -319,6 +325,10 @@ final class StylingModel: ObservableObject {
             let item = AVPlayerItem(asset: built.composition)
             item.videoComposition = built.videoComposition
             item.audioMix = built.audioMix
+            // Preview speed rides AVPlayer's rate (the composition stays 1x); keep the voice's
+            // pitch when it does.
+            item.audioTimePitchAlgorithm = .timeDomain
+            player.defaultRate = Float(renderSettings.playbackSpeed ?? 1)
             let time = player.currentTime()
             player.replaceCurrentItem(with: item)
             applyTrim()
@@ -346,7 +356,7 @@ final class StylingModel: ObservableObject {
                 let cacheDir = package.cacheDir
                 let audio = audioSettings
                 let settings = renderSettings
-                let canvas = sourceCanvasSize
+                let canvas = canvasSize
                 let bg = resolvedBackgroundImage()
                 let clicks = autoZoomClicks
                 let timeline = try await Task.detached {
@@ -369,14 +379,25 @@ final class StylingModel: ObservableObject {
         }
     }
 
-    private func renderSettingsChanged() {
-        if isLoaded { hasUnsavedChanges = true }
+    private func renderSettingsChanged(old: RenderSettings) {
+        if isLoaded, old != renderSettings {
+            hasUnsavedChanges = true
+            if !isRestoring { recordUndo(EditSnapshot(render: old, audio: audioSettings)) }
+        }
+        // Keep preview speed live: defaultRate covers the next play; an in-flight playback
+        // re-rates immediately.
+        let rate = Float(renderSettings.playbackSpeed ?? 1)
+        player.defaultRate = rate
+        if isPlaying, abs(player.rate - rate) > 0.001 { player.rate = rate }
         rebuildVideoComposition()
         persist()
     }
 
-    private func audioSettingsChanged() {
-        if isLoaded { hasUnsavedChanges = true }
+    private func audioSettingsChanged(old: AudioSettings) {
+        if isLoaded, old != audioSettings {
+            hasUnsavedChanges = true
+            if !isRestoring { recordUndo(EditSnapshot(render: renderSettings, audio: old)) }
+        }
         audioDebounce?.cancel()
         audioDebounce = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(150))
@@ -384,6 +405,64 @@ final class StylingModel: ObservableObject {
             await self.rebuildComposition()
         }
         persist()
+    }
+
+    // MARK: Undo/redo
+
+    /// Everything an edit can touch, captured as one value. Timeline zooms and trim live inside
+    /// `RenderSettings`, so this pair covers the whole editable state.
+    private struct EditSnapshot {
+        var render: RenderSettings
+        var audio: AudioSettings
+    }
+
+    private let editUndo = UndoManager()
+    private var isRestoring = false
+    private var lastUndoRegistration = Date.distantPast
+
+    /// One undo record per discrete edit. Continuous slider drags coalesce: registrations within
+    /// 0.8 s of the previous one extend that record (the drag's origin snapshot stays on the
+    /// stack) instead of stacking one per tick.
+    private func recordUndo(_ old: EditSnapshot) {
+        let now = Date()
+        defer { lastUndoRegistration = now }
+        if now.timeIntervalSince(lastUndoRegistration) < 0.8 { refreshUndoFlags(); return }
+        editUndo.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated { model.restore(old) }
+        }
+        refreshUndoFlags()
+    }
+
+    /// Applies a snapshot and registers the inverse — UndoManager routes that registration to the
+    /// redo stack automatically while undoing (and back again while redoing).
+    private func restore(_ snap: EditSnapshot) {
+        let current = EditSnapshot(render: renderSettings, audio: audioSettings)
+        isRestoring = true
+        if renderSettings != snap.render { renderSettings = snap.render }
+        if audioSettings != snap.audio { audioSettings = snap.audio }
+        isRestoring = false
+        hasUnsavedChanges = true
+        editUndo.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated { model.restore(current) }
+        }
+        refreshUndoFlags()
+    }
+
+    func undoEdit() {
+        lastUndoRegistration = .distantPast
+        editUndo.undo()
+        refreshUndoFlags()
+    }
+
+    func redoEdit() {
+        lastUndoRegistration = .distantPast
+        editUndo.redo()
+        refreshUndoFlags()
+    }
+
+    private func refreshUndoFlags() {
+        canUndo = editUndo.canUndo
+        canRedo = editUndo.canRedo
     }
 
     private func persist() {

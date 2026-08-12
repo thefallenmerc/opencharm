@@ -38,7 +38,7 @@ struct WebcamDragOverlay: View {
 
     var body: some View {
         GeometryReader { geo in
-            let canvas = model.sourceCanvasSize
+            let canvas = model.canvasSize
             let scale = min(geo.size.width / canvas.width, geo.size.height / canvas.height)
             let shown = CGSize(width: canvas.width * scale, height: canvas.height * scale)
             let origin = CGPoint(x: (geo.size.width - shown.width) / 2,
