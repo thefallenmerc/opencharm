@@ -42,11 +42,12 @@ final class AutoZoomTests: XCTestCase {
         XCTAssertEqual(segs.count, 1)                            // one held zoom
         XCTAssertEqual(segs[0].focusKeys.count, 2)               // panned to the second click
         // Holds on the first click until the second lands, then glides (low-pass) and settles.
-        XCTAssertEqual(ZoomTimeline.state(at: 2.5, segments: segs).focus.x, 0.25, accuracy: 0.02)
-        XCTAssertEqual(ZoomTimeline.state(at: 5.0, segments: segs).focus.x, 0.25, accuracy: 0.02)
+        // (Focus is no longer viewport-clamped: whole-canvas zoom stays gap-free at the edges.)
+        XCTAssertEqual(ZoomTimeline.state(at: 2.5, segments: segs).focus.x, 0.2, accuracy: 0.02)
+        XCTAssertEqual(ZoomTimeline.state(at: 5.0, segments: segs).focus.x, 0.2, accuracy: 0.02)
         let mid = ZoomTimeline.state(at: 5.3, segments: segs).focus.x
-        XCTAssertGreaterThan(mid, 0.27); XCTAssertLessThan(mid, 0.75)
-        XCTAssertEqual(ZoomTimeline.state(at: 6.5, segments: segs).focus.x, 0.75, accuracy: 0.02)
+        XCTAssertGreaterThan(mid, 0.22); XCTAssertLessThan(mid, 0.8)
+        XCTAssertEqual(ZoomTimeline.state(at: 6.5, segments: segs).focus.x, 0.8, accuracy: 0.02)
         // Crucially the scale never drops during the pan — it stays zoomed, doesn't zoom out/in.
         XCTAssertEqual(ZoomTimeline.state(at: 5.3, segments: segs).scale, 2.0, accuracy: 0.01)
     }
@@ -185,33 +186,5 @@ final class AutoZoomTests: XCTestCase {
         XCTAssertEqual(ZoomTimeline.state(at: 5.0, segments: segs).progress, 1.0, accuracy: 0.02)
     }
 
-    // MARK: Compositor crop geometry
-
-    func testZoomCropIsNoOpAtScaleOne() {
-        let img = CIImage(color: .gray).cropped(to: CGRect(x: 0, y: 0, width: 1920, height: 1080))
-        let out = Compositor().zoomedScreen(img, zoom: .identity)
-        XCTAssertEqual(out.extent, img.extent)
-    }
-
-    func testZoomCropShrinksAndCentersOnFocus() {
-        let img = CIImage(color: .gray).cropped(to: CGRect(x: 0, y: 0, width: 1000, height: 1000))
-        // scale 2 → 500×500 crop; focus top-left (0.25, 0.25) → CIImage center (250, 750).
-        let out = Compositor().zoomedScreen(
-            img, zoom: ZoomState(scale: 2, focus: .init(x: 0.25, y: 0.25)))
-        XCTAssertEqual(out.extent.width, 500, accuracy: 0.5)
-        XCTAssertEqual(out.extent.height, 500, accuracy: 0.5)
-        XCTAssertEqual(out.extent.midX, 250, accuracy: 0.5)
-        XCTAssertEqual(out.extent.midY, 750, accuracy: 0.5)   // y flipped from top-left focus
-    }
-
-    func testZoomCropClampsInsideFrame() {
-        let img = CIImage(color: .gray).cropped(to: CGRect(x: 0, y: 0, width: 1000, height: 1000))
-        // focus at extreme corner would push the crop off-frame; it must clamp fully inside.
-        let out = Compositor().zoomedScreen(
-            img, zoom: ZoomState(scale: 2, focus: .init(x: 0.0, y: 0.0)))
-        XCTAssertGreaterThanOrEqual(out.extent.minX, 0)
-        XCTAssertGreaterThanOrEqual(out.extent.minY, 0)
-        XCTAssertLessThanOrEqual(out.extent.maxX, 1000)
-        XCTAssertLessThanOrEqual(out.extent.maxY, 1000)
-    }
+    // Whole-canvas zoom geometry is covered by CanvasZoomTests.
 }

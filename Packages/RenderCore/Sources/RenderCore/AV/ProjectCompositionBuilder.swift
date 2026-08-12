@@ -16,6 +16,7 @@ public enum ProjectCompositionBuilder {
                              clicks: [ClickEvent] = [],
                              cursorSamples: [CursorSample] = [],
                              cursorImage: CIImage? = nil,
+                             cursorHandImage: CIImage? = nil,
                              retimeForExport: Bool = false) async throws -> BuiltComposition {
         let composition = AVMutableComposition()
 
@@ -59,6 +60,7 @@ public enum ProjectCompositionBuilder {
         var zoomSegments = settings.zooms.map { $0.map(\.segment) }
             ?? AutoZoom.segments(clicks: clicks, settings: settings.autoZoom ?? .default)
         var samples = cursorSamples
+        var clickTimes = clicks.map(\.time).sorted()
         if retimeForExport, abs(speed - 1) > 0.001 {
             let full = CMTimeRange(start: .zero, duration: composition.duration)
             composition.scaleTimeRange(
@@ -66,7 +68,10 @@ public enum ProjectCompositionBuilder {
                 toDuration: CMTime(seconds: full.duration.seconds / speed,
                                    preferredTimescale: 600))
             zoomSegments = zoomSegments.map { $0.scaled(by: 1 / speed) }
-            samples = samples.map { CursorSample(time: $0.time / speed, point: $0.point) }
+            samples = samples.map {
+                CursorSample(time: $0.time / speed, point: $0.point, cursorType: $0.cursorType)
+            }
+            clickTimes = clickTimes.map { $0 / speed }
         }
 
         let videoComposition = AVMutableVideoComposition()
@@ -79,7 +84,9 @@ public enum ProjectCompositionBuilder {
             settings: settings, backgroundImage: backgroundImage,
             zoomSegments: zoomSegments,
             cursorSamples: samples, cursorImage: cursorImage,
-            cursorSize: settings.cursorSize ?? 0.04)]
+            cursorHandImage: cursorHandImage,
+            cursorSize: settings.cursorSize ?? 0.04,
+            clickTimes: clickTimes)]
 
         var audioMix: AVAudioMix?
         if !mixParams.isEmpty {

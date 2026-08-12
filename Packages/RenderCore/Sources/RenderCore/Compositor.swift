@@ -14,47 +14,56 @@ public struct RenderInputs {
 public final class Compositor {
     public init() {}
 
+    // Squircle masks are rasterized once per (size, exponent) and reused across frames.
+    // `render` can be called from AVFoundation's concurrent request queue → lock the cache.
+    private var maskCache: [String: CIImage] = [:]
+    private let maskLock = NSLock()
+
     public func render(_ inputs: RenderInputs, settings: RenderSettings,
                        canvasSize: CGSize, zoom: ZoomState = .identity,
                        cursor: CursorFrame? = nil) -> CIImage {
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
-        // Auto-zoom is a crop of the screen layer only; the crop preserves aspect, so the layout
-        // (contentRect, corner radius, webcam, shadow) is unaffected.
-        let screen = zoomedScreen(inputs.screen, zoom: zoom)
         var layout = CanvasLayout.compute(
             canvasSize: canvasSize,
-            screenAspect: screen.extent.width / screen.extent.height,
+            screenAspect: inputs.screen.extent.width / inputs.screen.extent.height,
             settings: settings)
-        // Shrink the webcam bubble slightly while zoomed in, in step with the zoom envelope, so it
-        // stays unobtrusive over the magnified content (matches the reference).
+
+        // Stage: everything that magnifies together — background, padding, shadow, screen
+        // content, and the synthetic cursor. The zoom then scales this WHOLE stage (Screen
+        // Charm behavior), so the padding and background glide with the content instead of
+        // the video zooming alone inside a static frame.
+        var stage = backgroundLayer(settings.background, image: inputs.backgroundImage,
+                                    canvasRect: canvasRect)
+        if let blur = settings.backgroundBlur, blur > 0.001 {
+            let sigma = blur * 0.04 * min(canvasSize.width, canvasSize.height)
+            stage = stage.clampedToExtent()
+                .applyingGaussianBlur(sigma: sigma)
+                .cropped(to: canvasRect)
+        }
+        if settings.shadow.opacity > 0 {
+            stage = shadow(for: layout.contentRect, radius: layout.cornerRadius,
+                           opacity: settings.shadow.opacity,
+                           blurSigma: layout.shadowBlurSigma,
+                           offsetY: layout.shadowOffsetY)
+                .composited(over: stage)
+        }
+        stage = place(inputs.screen, in: layout.contentRect,
+                      cornerRadius: layout.cornerRadius, over: stage)
+        if let cursor {
+            stage = drawCursor(cursor, contentRect: layout.contentRect,
+                               canvasSize: canvasSize, over: stage)
+        }
+        stage = zoomedCanvas(stage, zoom: zoom, contentRect: layout.contentRect,
+                             canvasRect: canvasRect)
+
+        // The webcam floats above the zoom (it never magnifies), shrinking while zoomed in so
+        // it stays unobtrusive over the magnified content (matches the reference).
         if zoom.progress > 0 {
             let f = CGFloat(1 - 0.5 * min(max(zoom.progress, 0), 1)) // half size at full zoom
             layout.webcamRect = shrink(layout.webcamRect, by: f)
             layout.webcamCornerRadius *= f
         }
-
-        var result = backgroundLayer(settings.background, image: inputs.backgroundImage,
-                                     canvasRect: canvasRect)
-        if let blur = settings.backgroundBlur, blur > 0.001 {
-            let sigma = blur * 0.04 * min(canvasSize.width, canvasSize.height)
-            result = result.clampedToExtent()
-                .applyingGaussianBlur(sigma: sigma)
-                .cropped(to: canvasRect)
-        }
-        if settings.shadow.opacity > 0 {
-            result = shadow(for: layout.contentRect, radius: layout.cornerRadius,
-                            opacity: settings.shadow.opacity,
-                            blurSigma: layout.shadowBlurSigma,
-                            offsetY: layout.shadowOffsetY)
-                .composited(over: result)
-        }
-        result = place(screen, in: layout.contentRect,
-                       cornerRadius: layout.cornerRadius, over: result)
-        if let cursor {
-            result = drawCursor(cursor, zoom: zoom, contentRect: layout.contentRect,
-                                canvasSize: canvasSize, over: result)
-        }
-        result = webcamLayer(inputs.webcam, settings: settings, layout: layout, over: result)
+        var result = webcamLayer(inputs.webcam, settings: settings, layout: layout, over: stage)
         // Contract: output is always opaque, regardless of any alpha < 1 in caller-supplied
         // inputs (e.g. a semi-transparent solid/gradient color or a backgroundImage with alpha).
         let opaqueBackdrop = CIImage(color: .black).cropped(to: canvasRect)
@@ -62,47 +71,49 @@ public final class Compositor {
         return result.cropped(to: canvasRect)
     }
 
-    /// Crops the screen to a `1/scale` window centered on `zoom.focus` (normalized, top-left),
-    /// clamped inside the frame so the zoomed content always fully covers its rect (no empty
-    /// edges). `scale == 1` returns the image unchanged.
-    func zoomedScreen(_ screen: CIImage, zoom: ZoomState) -> CIImage {
-        guard zoom.scale > 1.0001 else { return screen }
-        let e = screen.extent
-        let cw = e.width / CGFloat(zoom.scale)
-        let ch = e.height / CGFloat(zoom.scale)
-        let cx = e.minX + CGFloat(zoom.focus.x) * e.width
-        let cy = e.minY + (1 - CGFloat(zoom.focus.y)) * e.height // focus is top-left; CIImage is y-up
-        var minX = cx - cw / 2
-        var minY = cy - ch / 2
-        minX = min(max(minX, e.minX), e.maxX - cw)
-        minY = min(max(minY, e.minY), e.maxY - ch)
-        return screen.cropped(to: CGRect(x: minX, y: minY, width: cw, height: ch))
+    /// Scales the composed canvas about the zoom focus (normalized over the screen CONTENT,
+    /// top-left origin, mapped into canvas space). The focus point keeps its on-screen position —
+    /// the view zooms "in place" toward it — and because scaling up about an interior point only
+    /// pushes edges outward, the canvas stays fully covered for any focus: no clamping, no gaps.
+    func zoomedCanvas(_ image: CIImage, zoom: ZoomState, contentRect: CGRect,
+                      canvasRect: CGRect) -> CIImage {
+        guard zoom.scale > 1.0001 else { return image }
+        let s = CGFloat(zoom.scale)
+        let fx = contentRect.minX + CGFloat(zoom.focus.x) * contentRect.width
+        let fy = contentRect.maxY - CGFloat(zoom.focus.y) * contentRect.height // focus top-left; y-up
+        let transform = CGAffineTransform(translationX: fx, y: fy)
+            .scaledBy(x: s, y: s)
+            .translatedBy(x: -fx, y: -fy)
+        return image.transformed(by: transform).cropped(to: canvasRect)
     }
 
-    /// Draws the synthetic pointer at the cursor's location — mapped through the same zoom crop as
-    /// the screen, so it tracks the visible content, grows with the zoom, and hides when the pointer
-    /// is outside the zoomed viewport. The image's top-left corner is placed at the pointer tip.
-    func drawCursor(_ cursor: CursorFrame, zoom: ZoomState, contentRect: CGRect,
+    /// Draws the synthetic pointer at the cursor's content location, pre-zoom — the canvas zoom
+    /// magnifies it with the content, so it grows in step and never detaches. The image's top-left
+    /// corner is the pointer tip. A soft drop shadow sits under it for depth against any background.
+    func drawCursor(_ cursor: CursorFrame, contentRect: CGRect,
                     canvasSize: CGSize, over bg: CIImage) -> CIImage {
-        let scale = CGFloat(max(zoom.scale, 1))
-        let half = 0.5 / scale
-        let nx = cursor.point.x, ny = cursor.point.y                  // pointer, normalized top-left
-        // crop is centred on the (clamped) zoom focus — same as `zoomedScreen`.
-        let cx = min(max(zoom.focus.x, half), 1 - half)
-        let cy = min(max(zoom.focus.y, half), 1 - half)
-        let u = (nx - (cx - half)) / (2 * half)                       // pointer position within the crop
-        let v = (ny - (cy - half)) / (2 * half)
-        guard u >= 0, u <= 1, v >= 0, v <= 1 else { return bg }       // outside the zoomed viewport
-        let px = contentRect.minX + u * contentRect.width
-        let py = contentRect.minY + (1 - v) * contentRect.height      // y-up
-        let h = CGFloat(cursor.sizeFraction) * canvasSize.height * scale
+        let px = contentRect.minX + cursor.point.x * contentRect.width
+        let py = contentRect.minY + (1 - cursor.point.y) * contentRect.height // y-up
+        let h = CGFloat(cursor.sizeFraction) * canvasSize.height
         let img = cursor.image
-        guard img.extent.height > 0 else { return bg }
+        guard img.extent.height > 0, h > 0 else { return bg }
         let s = h / img.extent.height
         let scaled = img.transformed(by: CGAffineTransform(scaleX: s, y: s))
         let positioned = scaled.transformed(by: CGAffineTransform(
             translationX: px - scaled.extent.minX, y: py - scaled.extent.maxY))
-        return positioned.composited(over: bg)
+        // Drop shadow: the pointer's silhouette, offset down-right and blurred.
+        let silhouette = positioned.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0.35),
+        ])
+        let dropShadow = silhouette
+            .transformed(by: CGAffineTransform(translationX: h * 0.05, y: -h * 0.06))
+            .clampedToExtent()
+            .applyingGaussianBlur(sigma: h * 0.05)
+            .cropped(to: positioned.extent.insetBy(dx: -h, dy: -h))
+        return positioned.composited(over: dropShadow.composited(over: bg))
     }
 
     /// Scales a rect about its center by `f` (used to shrink the webcam bubble during zoom).
@@ -196,7 +207,58 @@ public final class Compositor {
                             offsetY: layout.shadowOffsetY * 0.6)
                 .composited(over: result)
         }
-        return place(square, in: layout.webcamRect,
-                     cornerRadius: layout.webcamCornerRadius, over: result)
+        // Squircle bubble: continuous icon-like corners (superellipse), not a plain rounded rect.
+        let rect = layout.webcamRect
+        let sx = rect.width / square.extent.width
+        let sy = rect.height / square.extent.height
+        let placed = square
+            .transformed(by: .init(scaleX: sx, y: sy))
+            .transformed(by: .init(translationX: rect.minX - square.extent.minX * sx,
+                                   y: rect.minY - square.extent.minY * sy))
+        let blend = CIFilter.blendWithMask()
+        blend.inputImage = placed
+        blend.backgroundImage = result
+        blend.maskImage = squircleMask(rect: rect, roundness: settings.webcam.roundness)
+        return blend.outputImage!
+    }
+
+    /// White superellipse (|x|ⁿ + |y|ⁿ = 1) on transparent, filling `rect`. The exponent maps
+    /// from `roundness` so 1 stays a circle/ellipse (n = 2) and lower values tighten toward a
+    /// square with continuous, icon-like corners (e.g. 0.65 → n ≈ 3.1).
+    func squircleMask(rect: CGRect, roundness: Double) -> CIImage {
+        let n = 2.0 / min(max(roundness, 0.05), 1)
+        let w = max(Int(rect.width.rounded()), 2)
+        let h = max(Int(rect.height.rounded()), 2)
+        let key = "\(w)x\(h):\(Int(n * 100))"
+        maskLock.lock()
+        defer { maskLock.unlock() }
+        let base: CIImage
+        if let hit = maskCache[key] {
+            base = hit
+        } else {
+            guard let ctx = CGContext(
+                data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return .empty() }
+            let a = Double(w) / 2, b = Double(h) / 2
+            let path = CGMutablePath()
+            let steps = 256
+            for i in 0...steps {
+                let t = Double(i) / Double(steps) * 2 * .pi
+                let c = cos(t), s = sin(t)
+                let x = a + a * (c < 0 ? -1 : 1) * pow(abs(c), 2 / n)
+                let y = b + b * (s < 0 ? -1 : 1) * pow(abs(s), 2 / n)
+                if i == 0 { path.move(to: CGPoint(x: x, y: y)) }
+                else { path.addLine(to: CGPoint(x: x, y: y)) }
+            }
+            path.closeSubpath()
+            ctx.addPath(path)
+            ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+            ctx.fillPath()
+            guard let cg = ctx.makeImage() else { return .empty() }
+            base = CIImage(cgImage: cg)
+            maskCache[key] = base
+        }
+        return base.transformed(by: .init(translationX: rect.minX, y: rect.minY))
     }
 }

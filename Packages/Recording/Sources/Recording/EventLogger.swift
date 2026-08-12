@@ -7,8 +7,12 @@ public struct LoggedEvent: Codable, Equatable {
     public var x: Double
     public var y: Double
     public var type: String
-    public init(t: Double, x: Double, y: Double, type: String) {
+    /// Pointer shape at this moment ("pointingHand", "iBeam"; nil = arrow/unknown).
+    /// Additive: event logs written before this field decode it as nil.
+    public var cursorType: String?
+    public init(t: Double, x: Double, y: Double, type: String, cursorType: String? = nil) {
         (self.t, self.x, self.y, self.type) = (t, x, y, type)
+        self.cursorType = cursorType
     }
 }
 
@@ -37,7 +41,8 @@ public final class EventLogger {
             case .leftMouseUp, .rightMouseUp: type = "up"
             default: type = "move"
             }
-            self.log(LoggedEvent(t: now, x: loc.x, y: screenH - loc.y, type: type))
+            self.log(LoggedEvent(t: now, x: loc.x, y: screenH - loc.y, type: type,
+                                 cursorType: Self.currentCursorType()))
         }
         if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { handle($0) }) {
             monitors.append(global)
@@ -45,6 +50,22 @@ public final class EventLogger {
         if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { handle($0); return $0 }) {
             monitors.append(local)
         }
+    }
+
+    /// TIFF fingerprints of the system cursors we distinguish, resolved once. `currentSystem`
+    /// returns whatever cursor is on screen — including ones other apps set — so identity
+    /// comparison is useless; the bitmap is the only stable signature.
+    private static let knownCursors: [(type: String, tiff: Data)] = {
+        var out: [(String, Data)] = []
+        if let hand = NSCursor.pointingHand.image.tiffRepresentation { out.append(("pointingHand", hand)) }
+        if let beam = NSCursor.iBeam.image.tiffRepresentation { out.append(("iBeam", beam)) }
+        return out
+    }()
+
+    /// The on-screen pointer's shape right now, or nil for the arrow / anything unrecognized.
+    static func currentCursorType() -> String? {
+        guard let tiff = NSCursor.currentSystem?.image.tiffRepresentation else { return nil }
+        return knownCursors.first(where: { $0.tiff == tiff })?.type
     }
 
     public func log(_ event: LoggedEvent) {

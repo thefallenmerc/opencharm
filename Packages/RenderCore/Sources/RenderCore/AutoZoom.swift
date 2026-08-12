@@ -182,9 +182,10 @@ public enum AutoZoom {
         return segments
     }
 
-    /// Clamps a focus so its `1/scale` viewport stays fully within the frame (no empty edges).
-    static func clampFocus(_ p: CGPoint, half: CGFloat) -> CGPoint {
-        CGPoint(x: min(max(p.x, half), 1 - half), y: min(max(p.y, half), 1 - half))
+    /// Keeps a focus on-canvas. Whole-canvas zoom stays gap-free for any interior focus (edge
+    /// clicks show padding/background, like the reference), so no viewport clamping is needed.
+    static func clampFocus(_ p: CGPoint, half _: CGFloat) -> CGPoint {
+        CGPoint(x: min(max(p.x, 0), 1), y: min(max(p.y, 0), 1))
     }
 
     static func lerp(_ a: Double, _ b: Double, _ t: Double) -> Double { a + (b - a) * t }
@@ -196,11 +197,37 @@ public enum ZoomTimeline {
     static let panTau = 0.35
 
     /// The zoom to apply at composition time `t`. Segments are non-overlapping and time-ordered.
-    public static func state(at t: Double, segments: [ZoomSegment]) -> ZoomState {
+    /// With a `cursorTrack`, the zoomed viewport softly follows the live cursor (low-pass
+    /// filtered) once the zoom-in settles; without one it pans between the segment's focus keys.
+    public static func state(at t: Double, segments: [ZoomSegment],
+                             cursorTrack: [CursorSample] = []) -> ZoomState {
         guard let s = segments.first(where: { t >= $0.start && t < $0.end }) else { return .identity }
         let f = envelope(t, s)
-        return ZoomState(scale: 1 + (s.scale - 1) * f, focus: focus(at: t, keys: s.focusKeys),
-                         progress: f)
+        let focus = cursorTrack.isEmpty
+            ? focus(at: t, keys: s.focusKeys)
+            : followedFocus(at: t, segment: s, track: cursorTrack)
+        return ZoomState(scale: 1 + (s.scale - 1) * f, focus: focus, progress: f)
+    }
+
+    /// Soft cursor-follow: from the moment the zoom-in settles (the first focus key's time), the
+    /// pan target is the recorded cursor position, run through the same one-pole low-pass filter —
+    /// the viewport glides after the pointer like a camera operator instead of sitting static.
+    /// Deterministic (piecewise-exponential closed form), so preview and export agree exactly.
+    static func followedFocus(at t: Double, segment s: ZoomSegment,
+                              track: [CursorSample]) -> CGPoint {
+        let anchor = s.focusKeys.first?.point ?? CGPoint(x: 0.5, y: 0.5)
+        let followStart = s.focusKeys.first?.time ?? (s.start + s.easeIn)
+        guard t > followStart else { return anchor } // pinned while easing in
+        var pos = anchor
+        var clock = followStart
+        var target = CursorTrack.point(at: followStart, samples: track) ?? anchor
+        for sample in track where sample.time > followStart && sample.time < t {
+            pos = decay(pos, toward: target, over: sample.time - clock)
+            target = sample.point
+            clock = sample.time
+        }
+        pos = decay(pos, toward: target, over: t - clock)
+        return CGPoint(x: min(max(pos.x, 0), 1), y: min(max(pos.y, 0), 1))
     }
 
     /// Critically damped spring step response: quadratic start (zero velocity at 0), exponential

@@ -40,8 +40,9 @@ final class StylingModel: ObservableObject {
     }
     /// Recorded clicks mapped to normalized screen space, loaded once. Used to seed auto-zooms.
     private(set) var autoZoomClicks: [ClickEvent] = []
-    /// All pointer samples (moves + clicks), for focusing a manual zoom on the cursor location.
-    private(set) var cursorSamples: [(time: Double, point: CGPoint)] = []
+    /// All pointer samples (moves + clicks), for focusing zooms, cursor-follow panning, and
+    /// drawing the synthetic pointer.
+    private(set) var cursorSamples: [CursorSample] = []
     private var videoDebounce: Task<Void, Never>?
     private var audioDebounce: Task<Void, Never>?
     private var saveDebounce: Task<Void, Never>?
@@ -50,12 +51,15 @@ final class StylingModel: ObservableObject {
     /// New recordings hide the system cursor; the compositor draws this synthetic pointer instead.
     var hasSyntheticCursor: Bool { package.manifest.hidesSystemCursor ?? false }
     private lazy var cursorImage = CursorImage.make()
-    private var cursorTrack: [CursorSample] {
-        hasSyntheticCursor ? cursorSamples.map { CursorSample(time: $0.time, point: $0.point) } : []
-    }
+    private lazy var cursorHandImage = CursorImage.pointingHand()
+    /// The full pointer track goes to the builder regardless of the synthetic cursor: it also
+    /// drives the zoomed viewport's cursor-follow pan. Drawing is gated by `cursorImage` being
+    /// non-nil, so recordings that kept the system cursor never get a second pointer.
+    private var cursorTrack: [CursorSample] { cursorSamples }
     /// Cursor inputs for the exporter (mirrors what the preview uses).
     var exportCursorSamples: [CursorSample] { cursorTrack }
     var exportCursorImage: CIImage? { hasSyntheticCursor ? cursorImage : nil }
+    var exportCursorHandImage: CIImage? { hasSyntheticCursor ? cursorHandImage : nil }
 
     init(package: ProjectPackage, savedArchiveURL: URL? = nil) {
         self.package = package
@@ -319,7 +323,8 @@ final class StylingModel: ObservableObject {
             let built = try await ProjectCompositionBuilder.build(
                 timeline: timeline, settings: settings, canvasSize: canvas,
                 backgroundImage: bg, clicks: clicks,
-                cursorSamples: cursorTrack, cursorImage: cursorImage)
+                cursorSamples: cursorTrack, cursorImage: exportCursorImage,
+                cursorHandImage: exportCursorHandImage)
             guard !Task.isCancelled else { return }
             duration = built.composition.duration.seconds
             let item = AVPlayerItem(asset: built.composition)
@@ -368,7 +373,8 @@ final class StylingModel: ObservableObject {
                 let built = try await ProjectCompositionBuilder.build(
                     timeline: timeline, settings: settings, canvasSize: canvas,
                     backgroundImage: bg, clicks: clicks,
-                    cursorSamples: cursorTrack, cursorImage: cursorImage)
+                    cursorSamples: cursorTrack, cursorImage: exportCursorImage,
+                cursorHandImage: exportCursorHandImage)
                 guard !Task.isCancelled else { return }
                 item.videoComposition = built.videoComposition
                 if player.rate == 0 { // refresh the paused frame

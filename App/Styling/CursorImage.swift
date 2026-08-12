@@ -29,4 +29,36 @@ enum CursorImage {
         guard let cg = ctx.makeImage() else { return CIImage.empty() }
         return CIImage(cgImage: cg)
     }
+
+    /// Pointing-hand pointer (links/buttons), matching the arrow's black-fill/white-outline look.
+    /// Rendered from the SF Symbol at high resolution; the white outline is the symbol's alpha
+    /// dilated and colored, composited underneath. Fingertip lands near the top-left corner,
+    /// matching how the compositor anchors the image at the pointer tip.
+    static func pointingHand(pixelScale: CGFloat = 8) -> CIImage {
+        let size = NSSize(width: 22 * pixelScale, height: 22 * pixelScale)
+        let config = NSImage.SymbolConfiguration(pointSize: 20 * pixelScale, weight: .regular)
+        guard let symbol = NSImage(systemSymbolName: "hand.point.up.left.fill",
+                                   accessibilityDescription: nil)?
+            .withSymbolConfiguration(config) else { return make(pixelScale: pixelScale) }
+        let bitmap = NSImage(size: size, flipped: false) { rect in
+            NSColor.black.set()
+            symbol.draw(in: rect)
+            return true
+        }
+        guard let cg = bitmap.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return make(pixelScale: pixelScale)
+        }
+        let base = CIImage(cgImage: cg)
+        let outline = base
+            .applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+            ])
+            .applyingFilter("CIMorphologyMaximum",
+                            parameters: [kCIInputRadiusKey: 1.2 * pixelScale])
+            .cropped(to: base.extent)
+        return base.composited(over: outline)
+    }
 }

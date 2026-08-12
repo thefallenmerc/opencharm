@@ -20,12 +20,16 @@ final class CharmInstruction: NSObject, AVVideoCompositionInstructionProtocol {
     let zoomSegments: [ZoomSegment]
     let cursorSamples: [CursorSample]
     let cursorImage: CIImage?
+    let cursorHandImage: CIImage?
     let cursorSize: Double
+    let clickTimes: [Double]
 
     init(timeRange: CMTimeRange, screenTrackID: CMPersistentTrackID,
          webcamTrackID: CMPersistentTrackID?, settings: RenderSettings,
          backgroundImage: CIImage?, zoomSegments: [ZoomSegment] = [],
-         cursorSamples: [CursorSample] = [], cursorImage: CIImage? = nil, cursorSize: Double = 0.04) {
+         cursorSamples: [CursorSample] = [], cursorImage: CIImage? = nil,
+         cursorHandImage: CIImage? = nil, cursorSize: Double = 0.04,
+         clickTimes: [Double] = []) {
         self.timeRange = timeRange
         self.screenTrackID = screenTrackID
         self.webcamTrackID = webcamTrackID
@@ -34,7 +38,9 @@ final class CharmInstruction: NSObject, AVVideoCompositionInstructionProtocol {
         self.zoomSegments = zoomSegments
         self.cursorSamples = cursorSamples
         self.cursorImage = cursorImage
+        self.cursorHandImage = cursorHandImage
         self.cursorSize = cursorSize
+        self.clickTimes = clickTimes
     }
 }
 
@@ -102,13 +108,19 @@ public final class CharmVideoCompositor: NSObject, AVVideoCompositing {
             webcamImage = CIImage(cvPixelBuffer: pb)
         }
 
-        let zoom = ZoomTimeline.state(at: request.compositionTime.seconds,
-                                      segments: instruction.zoomSegments)
+        let t = request.compositionTime.seconds
+        let zoom = ZoomTimeline.state(at: t, segments: instruction.zoomSegments,
+                                      cursorTrack: instruction.cursorSamples)
         var cursor: CursorFrame?
         if let img = instruction.cursorImage,
-           let pt = CursorTrack.point(at: request.compositionTime.seconds,
-                                      samples: instruction.cursorSamples) {
-            cursor = CursorFrame(image: img, point: pt, sizeFraction: instruction.cursorSize)
+           let sample = CursorTrack.sample(at: t, samples: instruction.cursorSamples) {
+            // Pointer shape follows the recorded cursor type; the click pulse shrinks it
+            // briefly on mouse-down (scaling the size fraction keeps the tip anchored).
+            let image = sample.cursorType == "pointingHand"
+                ? (instruction.cursorHandImage ?? img) : img
+            let pulse = CursorPulse.scale(at: t, clicks: instruction.clickTimes)
+            cursor = CursorFrame(image: image, point: sample.point,
+                                 sizeFraction: instruction.cursorSize * pulse)
         }
         let rendered = compositor.render(
             RenderInputs(screen: screenImage, webcam: webcamImage,

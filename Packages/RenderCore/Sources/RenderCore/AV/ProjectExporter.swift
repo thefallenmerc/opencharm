@@ -23,13 +23,15 @@ public final class ProjectExporter {
     private let clicks: [ClickEvent]
     private let cursorSamples: [CursorSample]
     private let cursorImage: CIImage?
+    private let cursorHandImage: CIImage?
     private let cancelled = NSLock()
     private var isCancelled = false
 
     public init(timeline: MediaTimeline, settings: RenderSettings,
                 sourceCanvasSize: CGSize, backgroundImage: CIImage?,
                 clicks: [ClickEvent] = [],
-                cursorSamples: [CursorSample] = [], cursorImage: CIImage? = nil) {
+                cursorSamples: [CursorSample] = [], cursorImage: CIImage? = nil,
+                cursorHandImage: CIImage? = nil) {
         self.timeline = timeline
         self.settings = settings
         self.sourceCanvasSize = sourceCanvasSize
@@ -37,6 +39,7 @@ public final class ProjectExporter {
         self.clicks = clicks
         self.cursorSamples = cursorSamples
         self.cursorImage = cursorImage
+        self.cursorHandImage = cursorHandImage
     }
 
     public static func pixelSize(for resolution: ExportResolution,
@@ -72,6 +75,7 @@ public final class ProjectExporter {
             timeline: timeline, settings: settings, canvasSize: canvasSize,
             backgroundImage: backgroundImage, clicks: clicks,
             cursorSamples: cursorSamples, cursorImage: cursorImage,
+            cursorHandImage: cursorHandImage,
             retimeForExport: true)
         let duration = built.composition.duration.seconds
 
