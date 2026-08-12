@@ -37,6 +37,37 @@ public struct WebcamSettings: Codable, Equatable, Sendable {
     }
 }
 
+/// Output canvas aspect. `auto` matches the recording; presets extend the canvas on one axis
+/// (never cropping content — `CanvasLayout` already fits the screen inside whatever canvas it gets).
+public enum AspectPreset: String, Codable, CaseIterable, Sendable {
+    case auto, wide16x9, classic4x3, square, vertical9x16
+
+    public var ratio: CGFloat? {
+        switch self {
+        case .auto: nil
+        case .wide16x9: 16.0 / 9.0
+        case .classic4x3: 4.0 / 3.0
+        case .square: 1
+        case .vertical9x16: 9.0 / 16.0
+        }
+    }
+
+    /// Canvas for a given source (screen) size: keeps the axis that already fills the preset and
+    /// extends the other, rounded down to even pixels (codec requirement).
+    public func canvasSize(for source: CGSize) -> CGSize {
+        guard let ratio else { return source }
+        func even(_ v: CGFloat) -> CGFloat {
+            let f = v.rounded(.down)
+            return f - f.truncatingRemainder(dividingBy: 2)
+        }
+        let sourceAspect = source.width / source.height
+        if ratio >= sourceAspect {
+            return CGSize(width: even(source.height * ratio), height: even(source.height))
+        }
+        return CGSize(width: even(source.width), height: even(source.width / ratio))
+    }
+}
+
 public struct RenderSettings: Codable, Equatable, Sendable {
     public var background: Background
     /// Inset around the screen content, fraction of canvas min dimension. 0–0.25.
@@ -57,12 +88,14 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     /// Synthetic-pointer height as a fraction of canvas height (before zoom magnification). `nil` =
     /// the default. Only used when the recording hid the system cursor.
     public var cursorSize: Double?
+    /// Output canvas aspect preset. Additive/optional: `nil` = `.auto` (match the recording).
+    public var aspect: AspectPreset?
 
     public init(background: Background, paddingFraction: Double, cornerRadiusFraction: Double,
                 shadow: ShadowSettings, webcam: WebcamSettings,
                 autoZoom: AutoZoomSettings? = nil,
                 zooms: [ZoomSpec]? = nil, trimStart: Double? = nil, trimEnd: Double? = nil,
-                cursorSize: Double? = nil) {
+                cursorSize: Double? = nil, aspect: AspectPreset? = nil) {
         self.background = background
         self.paddingFraction = paddingFraction
         self.cornerRadiusFraction = cornerRadiusFraction
@@ -73,6 +106,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         self.trimStart = trimStart
         self.trimEnd = trimEnd
         self.cursorSize = cursorSize
+        self.aspect = aspect
     }
 
     public static let `default` = RenderSettings(
