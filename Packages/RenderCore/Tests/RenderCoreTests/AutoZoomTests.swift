@@ -33,7 +33,7 @@ final class AutoZoomTests: XCTestCase {
         XCTAssertGreaterThan(segs[0].end, 3.6 + 0.5)             // lingers past the last click
     }
 
-    func testOutOfViewClickPansAndArrivesAtClickTime() {
+    func testOutOfViewClickStartsALowPassPanThatSettles() {
         let clicks = [
             ClickEvent(time: 2.0, point: .init(x: 0.2, y: 0.5)),
             ClickEvent(time: 5.0, point: .init(x: 0.8, y: 0.5)), // within chain, but out of viewport
@@ -41,13 +41,65 @@ final class AutoZoomTests: XCTestCase {
         let segs = AutoZoom.segments(clicks: clicks, settings: on)
         XCTAssertEqual(segs.count, 1)                            // one held zoom
         XCTAssertEqual(segs[0].focusKeys.count, 2)               // panned to the second click
-        // Holds on the first click, arrives at the second exactly at its click time, between mid-pan.
+        // Holds on the first click until the second lands, then glides (low-pass) and settles.
         XCTAssertEqual(ZoomTimeline.state(at: 2.5, segments: segs).focus.x, 0.25, accuracy: 0.02)
-        XCTAssertEqual(ZoomTimeline.state(at: 5.0, segments: segs).focus.x, 0.75, accuracy: 0.02)
-        let mid = ZoomTimeline.state(at: 4.85, segments: segs).focus.x
-        XCTAssertGreaterThan(mid, 0.25); XCTAssertLessThan(mid, 0.75)
+        XCTAssertEqual(ZoomTimeline.state(at: 5.0, segments: segs).focus.x, 0.25, accuracy: 0.02)
+        let mid = ZoomTimeline.state(at: 5.3, segments: segs).focus.x
+        XCTAssertGreaterThan(mid, 0.27); XCTAssertLessThan(mid, 0.75)
+        XCTAssertEqual(ZoomTimeline.state(at: 6.5, segments: segs).focus.x, 0.75, accuracy: 0.02)
         // Crucially the scale never drops during the pan — it stays zoomed, doesn't zoom out/in.
-        XCTAssertEqual(ZoomTimeline.state(at: 4.85, segments: segs).scale, 2.0, accuracy: 0.01)
+        XCTAssertEqual(ZoomTimeline.state(at: 5.3, segments: segs).scale, 2.0, accuracy: 0.01)
+    }
+
+    // MARK: spring envelope + low-pass pan internals
+
+    func testSpringStepEndpointsAndMonotonicity() {
+        XCTAssertEqual(ZoomTimeline.springStep(0, settle: 0.8), 0)
+        XCTAssertEqual(ZoomTimeline.springStep(-1, settle: 0.8), 0)
+        XCTAssertGreaterThan(ZoomTimeline.springStep(0.8, settle: 0.8), 0.985) // settled at d
+        var prev = -1.0
+        for i in 0...100 {
+            let v = ZoomTimeline.springStep(Double(i) * 0.02, settle: 0.8)
+            XCTAssertGreaterThanOrEqual(v, prev)   // monotone
+            XCTAssertLessThanOrEqual(v, 1.0)       // never overshoots
+            prev = v
+        }
+    }
+
+    func testSpringStepStartsGently() {
+        // Zero velocity at t=0: the first 5% of the settle time moves < 8% of the range
+        // (a linear ramp would already be at 5%, accelerating curves much more).
+        XCTAssertLessThan(ZoomTimeline.springStep(0.04, settle: 0.8), 0.08)
+    }
+
+    func testEnvelopeIsContinuousAt60fps() {
+        let s = ZoomSegment(start: 1, end: 6, easeIn: 0.8, easeOut: 0.8,
+                            focus: CGPoint(x: 0.5, y: 0.5), scale: 2)
+        XCTAssertEqual(ZoomTimeline.envelope(0.9, s), 0)          // before
+        XCTAssertGreaterThan(ZoomTimeline.envelope(3.5, s), 0.99) // held ≈ 1
+        var prev = 0.0
+        for i in 0...299 { // stop shy of end: the envelope legitimately drops to 0 AT t=end
+            let v = ZoomTimeline.envelope(1 + Double(i) / 60.0, s)
+            XCTAssertLessThan(abs(v - prev), 0.08, "jump at frame \(i)")
+            prev = v
+        }
+    }
+
+    func testPanFilterConvergesWithoutOvershoot() {
+        let keys = [FocusKey(time: 1, point: CGPoint(x: 0.3, y: 0.3)),
+                    FocusKey(time: 2, point: CGPoint(x: 0.7, y: 0.6))]
+        // Pinned to the first key before (and at) its time — no pan during the zoom-in ease.
+        XCTAssertEqual(ZoomTimeline.focus(at: 0.5, keys: keys), CGPoint(x: 0.3, y: 0.3))
+        let mid = ZoomTimeline.focus(at: 2.2, keys: keys)
+        XCTAssertGreaterThan(mid.x, 0.3); XCTAssertLessThan(mid.x, 0.7)      // gliding, no jump
+        let settled = ZoomTimeline.focus(at: 5.0, keys: keys)
+        XCTAssertEqual(settled.x, 0.7, accuracy: 0.01)                       // converges
+        XCTAssertEqual(settled.y, 0.6, accuracy: 0.01)
+        for i in 0...100 { // never overshoots the target on either axis
+            let p = ZoomTimeline.focus(at: 1 + Double(i) * 0.05, keys: keys)
+            XCTAssertLessThanOrEqual(p.x, 0.7 + 1e-9)
+            XCTAssertLessThanOrEqual(p.y, 0.6 + 1e-9)
+        }
     }
 
     func testZoomIsFullyInAtTheClickAndHoldsAfter() {

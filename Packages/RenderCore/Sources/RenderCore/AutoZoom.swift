@@ -111,7 +111,7 @@ public struct ZoomState: Equatable, Sendable {
 
 public enum AutoZoom {
     static let chainGap = 3.5          // clicks within this many seconds of the last one chain
-    static let postClickHold = 1.0     // wait this long after the last click before easing out
+    static let postClickHold = 1.3     // wait this long after the last click before easing out
     static let panMargin: CGFloat = 0.85 // a click within this fraction of the viewport stays in view
 
     /// Deterministically turns clicks into non-overlapping zoom segments. Empty when disabled or
@@ -182,7 +182,9 @@ public enum AutoZoom {
 }
 
 public enum ZoomTimeline {
-    static let panDuration = 0.45 // seconds to glide between focus keyframes (arriving at the click)
+    /// One-pole low-pass time constant for cursor-follow pans. Heavy smoothing is what makes the
+    /// motion read as a camera operator, not a jitterbug (Screen Charm ships ~this feel).
+    static let panTau = 0.35
 
     /// The zoom to apply at composition time `t`. Segments are non-overlapping and time-ordered.
     public static func state(at t: Double, segments: [ZoomSegment]) -> ZoomState {
@@ -192,38 +194,45 @@ public enum ZoomTimeline {
                          progress: f)
     }
 
-    /// Focus at time `t`: holds each keyframe's point, then glides to the next over `panDuration`,
-    /// arriving as that click lands. Before the first key it holds the first point (the zoom-in
-    /// grows toward it).
-    static func focus(at t: Double, keys: [FocusKey]) -> CGPoint {
-        guard let first = keys.first else { return CGPoint(x: 0.5, y: 0.5) }
-        if keys.count == 1 || t <= first.time { return first.point }
-        for i in 1..<keys.count {
-            let prev = keys[i - 1], cur = keys[i]
-            if t < cur.time {
-                let pan = min(panDuration, cur.time - prev.time)
-                let panStart = cur.time - pan
-                if t <= panStart { return prev.point }
-                let u = smoothstep((t - panStart) / max(pan, 1e-6))
-                return CGPoint(x: prev.point.x + (cur.point.x - prev.point.x) * u,
-                               y: prev.point.y + (cur.point.y - prev.point.y) * u)
-            }
-        }
-        return keys.last!.point
+    /// Critically damped spring step response: quadratic start (zero velocity at 0), exponential
+    /// settle, mathematically incapable of overshoot. Reaches ~0.995 of the range at `settle`.
+    static func springStep(_ t: Double, settle d: Double) -> Double {
+        guard t > 0 else { return 0 }
+        guard d > 1e-6 else { return 1 }
+        let x = 7.5 / d * t // ω·d = 7.5 ⇒ p(d) ≈ 0.995
+        return 1 - (1 + x) * exp(-x)
     }
 
-    /// 0 at the segment edges, 1 across the hold, smoothstepped through the ease ramps.
+    /// Spring in from the start, spring out toward the end; `min` composes the two so short
+    /// segments stay continuous (they simply never reach a full hold).
     static func envelope(_ t: Double, _ s: ZoomSegment) -> Double {
-        if t < s.start + s.easeIn {
-            return smoothstep((t - s.start) / max(s.easeIn, 1e-6))
-        } else if t > s.end - s.easeOut {
-            return smoothstep((s.end - t) / max(s.easeOut, 1e-6))
-        }
-        return 1
+        guard t >= s.start, t < s.end else { return 0 }
+        return min(springStep(t - s.start, settle: max(s.easeIn, 0.15)),
+                   springStep(s.end - t, settle: max(s.easeOut, 0.15)))
     }
 
-    static func smoothstep(_ x: Double) -> Double {
-        let c = min(max(x, 0), 1)
-        return c * c * (3 - 2 * c)
+    /// Focus at `t`: the key points are step targets; the camera runs them through a one-pole
+    /// low-pass filter (closed form, piecewise-exponential — deterministic, so preview and export
+    /// agree exactly). Before the first key the focus is pinned to it: the zoom-in grows toward
+    /// the first click and never pans while easing.
+    static func focus(at t: Double, keys: [FocusKey]) -> CGPoint {
+        guard var target = keys.first?.point else { return CGPoint(x: 0.5, y: 0.5) }
+        guard keys.count > 1, t > keys[0].time else { return target }
+        var pos = target
+        var clock = keys[0].time
+        for key in keys.dropFirst() where key.time < t {
+            pos = decay(pos, toward: target, over: key.time - clock)
+            target = key.point
+            clock = key.time
+        }
+        return decay(pos, toward: target, over: t - clock)
+    }
+
+    /// Exponential approach: after `dt` seconds the remaining distance to `target` shrinks by
+    /// `e^(-dt/panTau)`. Monotone per axis — the pan can slow down but never overshoot or bounce.
+    static func decay(_ p: CGPoint, toward target: CGPoint, over dt: Double) -> CGPoint {
+        guard dt > 0 else { return p }
+        let a = 1 - exp(-dt / panTau)
+        return CGPoint(x: p.x + (target.x - p.x) * a, y: p.y + (target.y - p.y) * a)
     }
 }
