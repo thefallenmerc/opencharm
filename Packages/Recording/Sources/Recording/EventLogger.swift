@@ -10,9 +10,16 @@ public struct LoggedEvent: Codable, Equatable {
     /// Pointer shape at this moment ("pointingHand", "iBeam"; nil = arrow/unknown).
     /// Additive: event logs written before this field decode it as nil.
     public var cursorType: String?
-    public init(t: Double, x: Double, y: Double, type: String, cursorType: String? = nil) {
+    /// For `type == "rect"` events: the capture rect's size — (x, y) is its global top-left
+    /// origin. Logged when a captured window moves or resizes so pointer events map into the
+    /// frame that was current when they happened. Additive: older logs decode these as nil.
+    public var w: Double?
+    public var h: Double?
+    public init(t: Double, x: Double, y: Double, type: String, cursorType: String? = nil,
+                w: Double? = nil, h: Double? = nil) {
         (self.t, self.x, self.y, self.type) = (t, x, y, type)
         self.cursorType = cursorType
+        (self.w, self.h) = (w, h)
     }
 }
 

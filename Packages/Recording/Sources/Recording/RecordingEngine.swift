@@ -1,7 +1,9 @@
 import AVFoundation
 import CoreGraphics
+import CoreMedia
 import Foundation
 import ProjectStore
+import ScreenCaptureKit
 
 @MainActor
 public final class RecordingEngine: ObservableObject {
@@ -22,9 +24,11 @@ public final class RecordingEngine: ObservableObject {
     /// on it would be a tautology that always reads as "not yet active" until the very write
     /// that's supposed to be gated).
     private var capturesSystemAudio = false
-    /// Global desktop rect the screen video covers, persisted to the manifest for auto-zoom click
-    /// mapping. `nil` for window captures (the window can move mid-recording).
+    /// Global desktop rect the screen video covers at start, persisted to the manifest for
+    /// auto-zoom click mapping. For window captures this is the window's frame at start;
+    /// movement afterwards is tracked by `rectTask` as "rect" events in the event log.
     private var captureGlobalRect: CGRect?
+    private var rectTask: Task<Void, Never>?
 
     public init() {}
 
@@ -38,9 +42,18 @@ public final class RecordingEngine: ObservableObject {
             let b = CGDisplayBounds(displayID)
             return CGRect(x: b.origin.x + rect.origin.x, y: b.origin.y + rect.origin.y,
                           width: rect.width, height: rect.height)
-        case .window:
-            return nil
+        case .window(let window):
+            // The frame at start; `rectTask` logs "rect" events if the window moves later.
+            return window.frame
         }
+    }
+
+    /// Current global (top-left, points) bounds of an on-screen window, or nil once it's gone.
+    static func currentWindowBounds(windowID: CGWindowID) -> CGRect? {
+        guard let info = CGWindowListCopyWindowInfo(.optionIncludingWindow, windowID) as? [[String: Any]],
+              let boundsDict = info.first?[kCGWindowBounds as String] as? [String: Any],
+              let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else { return nil }
+        return bounds
     }
 
     public func start(configuration: RecordingConfiguration, projectURL: URL) async throws {
@@ -89,6 +102,27 @@ public final class RecordingEngine: ObservableObject {
         self.captureGlobalRect = Self.globalCaptureRect(for: configuration.source)
         self.webcamPreviewLayer = webcam?.previewLayer
         state = .recording(startedAt: Date())
+
+        // Window captures follow the window wherever it goes, so click positions only make
+        // sense relative to where the window was *at that moment*. Poll its bounds and log a
+        // "rect" event whenever it moves or resizes; ClickTrack replays these to map clicks.
+        if case .window(let scWindow) = configuration.source {
+            let windowID = scWindow.windowID
+            var lastRect = captureGlobalRect
+            rectTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    guard let self, case .recording = self.state else { return }
+                    guard let bounds = Self.currentWindowBounds(windowID: windowID),
+                          bounds != lastRect else { continue }
+                    lastRect = bounds
+                    let now = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+                    self.events?.log(LoggedEvent(t: now, x: bounds.minX, y: bounds.minY,
+                                                 type: "rect",
+                                                 w: bounds.width, h: bounds.height))
+                }
+            }
+        }
 
         // Persist offsets as soon as every active source has produced a first sample.
         offsetsTask = Task { [weak self] in
@@ -139,6 +173,8 @@ public final class RecordingEngine: ObservableObject {
         }
         state = .stopping
         offsetsTask?.cancel()
+        rectTask?.cancel()
+        rectTask = nil
 
         // Best-effort every step: a failure partway through (any recorder's stop,
         // finalize, or manifest save) must not leave the engine stuck in `.stopping`
