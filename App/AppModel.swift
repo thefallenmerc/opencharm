@@ -78,6 +78,18 @@ final class AppModel: ObservableObject {
         studio.show(package: pkg, savedArchive: savedArchive)
     }
 
+    /// The dock's ✕: with the Studio open, quitting from a stray click would just raise
+    /// the save prompt (reads as a no-op) — bring the Studio forward instead. Quit only
+    /// when no Studio window is up.
+    func closeFromDock() {
+        if let window = studio.window, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
+            NSApp.terminate(nil)
+        }
+    }
+
     /// Quit-time save prompt for an open Studio project with unsaved work.
     func applicationShouldTerminate() -> NSApplication.TerminateReply {
         studio.promptSaveForTermination()
