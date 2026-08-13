@@ -165,6 +165,65 @@ final class StylingModel: ObservableObject {
 
     var zooms: [ZoomSpec] { renderSettings.zooms ?? [] }
 
+    /// The zoom applied to the preview frame at `t` — the canvas overlay uses it to keep
+    /// editing chrome (blur boxes) aligned with the magnified content.
+    func zoomState(at t: Double) -> ZoomState {
+        ZoomTimeline.state(at: t, segments: zooms.map(\.segment), cursorTrack: cursorSamples)
+    }
+
+    // MARK: Privacy blur boxes
+
+    /// Selection is shared by the timeline lane and the canvas overlay: selecting in either
+    /// place shows the resize chrome in both.
+    @Published var selectedBlurID: String?
+    /// Armed by the toolbar "Blur" button; the canvas overlay then turns a drag into a new box.
+    @Published var isDrawingBlur = false
+
+    var blurBoxes: [BlurBoxSpec] { renderSettings.blurBoxes ?? [] }
+
+    /// Creates a 2-second box at the playhead over `rect` (normalized content space) and
+    /// selects it.
+    @discardableResult
+    func addBlurBox(rect: CGRect) -> BlurBoxSpec {
+        let start = min(max(0, currentTime), max(0, duration - 0.5))
+        let end = duration > 0 ? min(duration, start + 2) : start + 2
+        let spec = BlurBoxSpec(id: UUID().uuidString, start: start, end: max(end, start + 0.5),
+                               rect: rect)
+        renderSettings.blurBoxes = (blurBoxes + [spec]).sorted { $0.start < $1.start }
+        selectedBlurID = spec.id
+        return spec
+    }
+
+    func updateBlurBox(_ spec: BlurBoxSpec) {
+        guard blurBoxes.contains(where: { $0.id == spec.id }) else { return }
+        renderSettings.blurBoxes = blurBoxes.map { $0.id == spec.id ? spec : $0 }
+            .sorted { $0.start < $1.start }
+    }
+
+    /// Resizes a box's time span (composition seconds), clamped to a minimum length.
+    func resizeBlurBox(_ spec: BlurBoxSpec, start: Double? = nil, end: Double? = nil) {
+        let minLen = 0.2
+        var s = spec
+        if let start { s.start = min(max(0, start), s.end - minLen) }
+        if let end { s.end = max(min(max(duration, minLen), end), s.start + minLen) }
+        updateBlurBox(s)
+    }
+
+    func deleteBlurBox(_ id: String) {
+        renderSettings.blurBoxes = blurBoxes.filter { $0.id != id }
+        if selectedBlurID == id { selectedBlurID = nil }
+    }
+
+    /// Select (or deselect with nil). Selecting seeks into the box's time range when the
+    /// playhead is outside it, so the blur is visible on the preview while editing.
+    func selectBlur(_ id: String?) {
+        selectedBlurID = id
+        guard let id, let spec = blurBoxes.first(where: { $0.id == id }) else { return }
+        if currentTime < spec.start || currentTime > spec.end {
+            seek(to: spec.start + min(0.05, (spec.end - spec.start) / 2))
+        }
+    }
+
     private func specs(from segments: [ZoomSegment], manual: Bool) -> [ZoomSpec] {
         segments.map {
             ZoomSpec(id: UUID().uuidString, start: $0.start, end: $0.end,

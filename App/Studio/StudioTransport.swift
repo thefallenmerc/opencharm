@@ -36,13 +36,27 @@ struct StudioTransport: View {
                  Color(.sRGB, red: 0.93, green: 0.53, blue: 0.12, opacity: 1)],
         startPoint: .top, endPoint: .bottom)
     private let goldCap = Color(.sRGB, red: 1.0, green: 0.89, blue: 0.58, opacity: 1)
+    private let blurGrad = LinearGradient(
+        colors: [Color(.sRGB, red: 0.38, green: 0.67, blue: 0.76, opacity: 1),
+                 Color(.sRGB, red: 0.15, green: 0.42, blue: 0.55, opacity: 1)],
+        startPoint: .top, endPoint: .bottom)
+    private let blurCap = Color(.sRGB, red: 0.64, green: 0.85, blue: 0.91, opacity: 1)
     private let playheadColor = Color(.sRGB, red: 0.25, green: 0.55, blue: 1.0, opacity: 1)
+
+    /// Total height of the ruler + lanes stack; the blur lane only appears once boxes exist.
+    private var lanesHeight: CGFloat {
+        rulerH + trackH + laneH + 16 + (model.blurBoxes.isEmpty ? 0 : laneH + 8)
+    }
 
     var body: some View {
         VStack(spacing: 10) {
             controlRow
             if let id = selectedID, let spec = model.zooms.first(where: { $0.id == id }) {
                 zoomEditor(spec)
+            }
+            if let bid = model.selectedBlurID,
+               let spec = model.blurBoxes.first(where: { $0.id == bid }) {
+                blurEditor(spec)
             }
             if let sid = selectedSegmentID,
                let seg = model.timelineSegments.first(where: { $0.id == sid }) {
@@ -56,15 +70,17 @@ struct StudioTransport: View {
                             ruler(pps: pps)
                             track(pps: pps)
                             zoomLane(pps: pps)
+                            if !model.blurBoxes.isEmpty {
+                                blurLane(pps: pps)
+                            }
                         }
                         playhead(pps: pps)
                     }
-                    .frame(width: dur * pps, height: rulerH + trackH + laneH + 16,
-                           alignment: .topLeading)
+                    .frame(width: dur * pps, height: lanesHeight, alignment: .topLeading)
                     .coordinateSpace(name: space)
                 }
             }
-            .frame(height: rulerH + trackH + laneH + 16)
+            .frame(height: lanesHeight)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -109,7 +125,14 @@ struct StudioTransport: View {
                     .cursor(.pointingHand)
                 }
                 Spacer()
-                // Right: Cut splits the video at the playhead into segments.
+                // Right: Blur arms draw-a-privacy-mask mode; Cut splits at the playhead.
+                Button {
+                    model.isDrawingBlur.toggle()
+                } label: {
+                    Label("Blur", systemImage: "eye.slash")
+                }
+                .buttonStyle(ChipButtonStyle(prominent: model.isDrawingBlur))
+                .help("Drag on the preview to draw a privacy blur — it appears as a 2s box on the timeline")
                 Button {
                     model.splitAtPlayhead()
                 } label: {
@@ -371,13 +394,116 @@ struct StudioTransport: View {
         return d
     }
 
+    // MARK: blur lane
+
+    private func blurLane(pps: Double) -> some View {
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 9).fill(blurCap.opacity(0.10)) // lane bed
+            ForEach(model.blurBoxes) { spec in blurTag(spec, pps: pps) }
+        }
+        .frame(height: laneH)
+        .contentShape(Rectangle())
+        .onTapGesture { model.selectBlur(nil) } // empty lane click deselects
+    }
+
+    private func blurTag(_ spec: BlurBoxSpec, pps: Double) -> some View {
+        let x = spec.start * pps
+        let w = max(2 * capW + 30, (spec.end - spec.start) * pps)
+        let selected = model.selectedBlurID == spec.id
+        return ZStack {
+            RoundedRectangle(cornerRadius: 9).fill(blurGrad)
+            HStack(spacing: 5) {
+                Image(systemName: "eye.slash.fill").font(.system(size: 11, weight: .bold))
+                Text("Blur").font(.system(size: 13, weight: .bold))
+            }
+            .foregroundStyle(.white.opacity(0.92))
+        }
+        .frame(width: w, height: laneH - 2)
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(.white, lineWidth: selected ? 2 : 0))
+        .overlay(alignment: .leading) {
+            endCap(pointsLeft: true, fill: blurCap, height: laneH - 2)
+                .opacity(selected ? 1 : 0.9)
+                .gesture(blurResizeDrag(spec, pps: pps, leading: true))
+        }
+        .overlay(alignment: .trailing) {
+            endCap(pointsLeft: false, fill: blurCap, height: laneH - 2)
+                .opacity(selected ? 1 : 0.9)
+                .gesture(blurResizeDrag(spec, pps: pps, leading: false))
+        }
+        .offset(x: x, y: 1)
+        .cursor(.pointingHand)
+        .onTapGesture { model.selectBlur(selected ? nil : spec.id) }
+        .gesture(blurMoveDrag(spec, pps: pps))
+    }
+
+    private func blurEditor(_ spec: BlurBoxSpec) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "eye.slash")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(StudioTheme.textSecondary)
+            Text("Blur \(fmt(spec.start))–\(fmt(spec.end))")
+                .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                .foregroundStyle(StudioTheme.textPrimary)
+            Text("drag the box on the preview to reposition, corners to resize")
+                .font(.system(size: 11))
+                .foregroundStyle(StudioTheme.textSecondary)
+            Spacer()
+            Button(role: .destructive) {
+                model.deleteBlurBox(spec.id)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+            .buttonStyle(ChipButtonStyle())
+        }
+        .foregroundStyle(StudioTheme.textPrimary)
+    }
+
+    /// Dragging a blur pill moves its whole time span.
+    private func blurMoveDrag(_ spec: BlurBoxSpec, pps: Double) -> some Gesture {
+        DragGesture(minimumDistance: 4, coordinateSpace: .named(space))
+            .onChanged { v in
+                let a = beginBlurDrag(spec)
+                let len = a.end - a.start
+                let newStart = min(max(0, a.start + v.translation.width / pps),
+                                   max(0, model.duration - len))
+                var s = spec
+                s.start = newStart
+                s.end = newStart + len
+                model.updateBlurBox(s)
+                model.selectedBlurID = spec.id
+            }
+            .onEnded { _ in drag = nil }
+    }
+
+    /// Dragging a blur pill's chevron cap changes its start (leading) or end (trailing).
+    private func blurResizeDrag(_ spec: BlurBoxSpec, pps: Double, leading: Bool) -> some Gesture {
+        DragGesture(minimumDistance: 1, coordinateSpace: .named(space))
+            .onChanged { v in
+                let a = beginBlurDrag(spec)
+                let dt = v.translation.width / pps
+                model.selectedBlurID = spec.id
+                if leading { model.resizeBlurBox(spec, start: a.start + dt) }
+                else { model.resizeBlurBox(spec, end: a.end + dt) }
+            }
+            .onEnded { _ in drag = nil }
+    }
+
+    /// Same anchor-at-drag-start trick as `beginDrag`, reusing the zoom anchor storage
+    /// (ids never collide; only one pill drags at a time).
+    private func beginBlurDrag(_ spec: BlurBoxSpec) -> ZoomDragAnchor {
+        if let d = drag, d.id == spec.id { return d }
+        let d = ZoomDragAnchor(id: spec.id, start: spec.start, end: spec.end, keys: nil)
+        drag = d
+        return d
+    }
+
     // MARK: playhead
 
     private func playhead(pps: Double) -> some View {
         let x = model.currentTime * pps
         return Path { p in
             p.move(to: CGPoint(x: x, y: 6))
-            p.addLine(to: CGPoint(x: x, y: rulerH + trackH + laneH + 16))
+            p.addLine(to: CGPoint(x: x, y: lanesHeight))
         }
         .stroke(playheadColor, lineWidth: 2)
         .overlay(RoundedRectangle(cornerRadius: 2).fill(playheadColor)
