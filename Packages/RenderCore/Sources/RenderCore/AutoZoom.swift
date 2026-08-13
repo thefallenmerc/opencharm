@@ -106,8 +106,7 @@ public struct ZoomSpec: Codable, Equatable, Sendable, Identifiable {
 }
 
 /// The evaluated zoom for one instant: `scale` (1 = no zoom) about `focus` (normalized, top-left).
-/// `progress` is the eased 0…1 envelope (0 = out, 1 = fully zoomed) — used to shrink the webcam in
-/// step with the zoom.
+/// `progress` is the eased 0…1 envelope (0 = out, 1 = fully zoomed).
 public struct ZoomState: Equatable, Sendable {
     public var scale: Double
     public var focus: CGPoint

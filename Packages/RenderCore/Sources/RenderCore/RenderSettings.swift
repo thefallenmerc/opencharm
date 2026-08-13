@@ -142,6 +142,6 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         shadow: ShadowSettings(opacity: 0.45, radius: 0.03, offsetY: 0.012),
         // Squircle bubble (icon-like continuous corners, not a circle), 1.2× the old default size.
         webcam: WebcamSettings(visible: true, center: CGPoint(x: 0.87, y: 0.82),
-                               size: 0.58, roundness: 0.65),
+                               size: 0.29, roundness: 0.65),
         autoZoom: .default)
 }

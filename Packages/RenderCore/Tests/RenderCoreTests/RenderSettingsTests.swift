@@ -8,7 +8,7 @@ final class RenderSettingsTests: XCTestCase {
         XCTAssertEqual(s.cornerRadiusFraction, 0.02, accuracy: 0.0001)
         XCTAssertTrue(s.webcam.visible)
         XCTAssertEqual(s.webcam.center, CGPoint(x: 0.87, y: 0.82)) // bottom-right, y measured from TOP
-        XCTAssertEqual(s.webcam.size, 0.58, accuracy: 0.0001)     // 1.2× the original default
+        XCTAssertEqual(s.webcam.size, 0.29, accuracy: 0.0001)     // matches the old zoomed-in size
         XCTAssertEqual(s.webcam.roundness, 0.65, accuracy: 0.0001) // squircle, not a circle
         XCTAssertEqual(s.autoZoom?.enabled, true) // zoom-on-click on by default
     }

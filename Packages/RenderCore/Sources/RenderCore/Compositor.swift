@@ -56,15 +56,8 @@ public final class Compositor {
         stage = zoomedCanvas(stage, zoom: zoom, contentRect: layout.contentRect,
                              canvasRect: canvasRect)
 
-        // The webcam floats above the zoom (it never magnifies), shrinking while zoomed in so
-        // it stays unobtrusive over the magnified content (matches the reference). It shrinks
-        // toward the canvas corner it lives in — outer edges pinned — so it stays tucked in its
-        // corner instead of drifting toward the middle.
-        if zoom.progress > 0 {
-            let f = CGFloat(1 - 0.5 * min(max(zoom.progress, 0), 1)) // half size at full zoom
-            layout.webcamRect = shrinkAnchored(layout.webcamRect, by: f, canvas: canvasSize)
-            layout.webcamCornerRadius *= f
-        }
+        // The webcam floats above the zoom (it never magnifies) at a constant size — the
+        // default bubble is already small enough to stay unobtrusive over magnified content.
         var result = webcamLayer(inputs.webcam, settings: settings, layout: layout, over: stage)
         // Contract: output is always opaque, regardless of any alpha < 1 in caller-supplied
         // inputs (e.g. a semi-transparent solid/gradient color or a backgroundImage with alpha).
@@ -116,15 +109,6 @@ public final class Compositor {
             .applyingGaussianBlur(sigma: h * 0.05)
             .cropped(to: positioned.extent.insetBy(dx: -h, dy: -h))
         return positioned.composited(over: dropShadow.composited(over: bg))
-    }
-
-    /// Scales a rect by `f`, keeping the edges nearest the canvas corner fixed — a corner bubble
-    /// shrinks INTO its corner rather than floating toward the canvas center.
-    private func shrinkAnchored(_ rect: CGRect, by f: CGFloat, canvas: CGSize) -> CGRect {
-        let w = rect.width * f, h = rect.height * f
-        let x = rect.midX < canvas.width / 2 ? rect.minX : rect.maxX - w
-        let y = rect.midY < canvas.height / 2 ? rect.minY : rect.maxY - h // y-up: minY = bottom
-        return CGRect(x: x, y: y, width: w, height: h)
     }
 
     // MARK: layers
