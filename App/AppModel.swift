@@ -99,6 +99,14 @@ final class AppModel: ObservableObject {
             if PermissionsService.status(.camera) == .undetermined {
                 _ = await PermissionsService.request(.camera)
             }
+            // The mic must be requested too: recording treats it as optional and silently
+            // drops the track when not granted, so without an explicit ask a fresh TCC
+            // state (first launch, or a dev re-sign resetting grants) records no narration.
+            // Only when the dock's mic toggle is on — a deliberately disabled mic must
+            // never prompt.
+            if sources.micEnabled, PermissionsService.status(.microphone) == .undetermined {
+                _ = await PermissionsService.request(.microphone)
+            }
             refreshIdlePreview()
             refreshMicMeter()
         }
@@ -266,10 +274,23 @@ final class AppModel: ObservableObject {
 
     func beginCountdownAndRecord() {
         isCountingDown = true
-        CountdownWindow.present(seconds: 3) { [weak self] in
-            Task {
-                await self?.recordWithBubble()
-                self?.isCountingDown = false
+        Task { [weak self] in
+            guard let self else { return }
+            // Belt-and-braces: camera/mic are optional tracks that silently drop when not
+            // granted, so an undetermined grant must prompt NOW, before the countdown —
+            // otherwise the user only discovers the missing narration after recording.
+            // (.denied never re-prompts; the onboarding popover covers that path.)
+            if sources.micEnabled, PermissionsService.status(.microphone) == .undetermined {
+                _ = await PermissionsService.request(.microphone)
+            }
+            if sources.cameraEnabled, PermissionsService.status(.camera) == .undetermined {
+                _ = await PermissionsService.request(.camera)
+            }
+            CountdownWindow.present(seconds: 3) { [weak self] in
+                Task {
+                    await self?.recordWithBubble()
+                    self?.isCountingDown = false
+                }
             }
         }
     }
