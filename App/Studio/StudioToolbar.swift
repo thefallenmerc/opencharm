@@ -53,6 +53,10 @@ struct StudioToolbar: View {
         }
         .frame(height: 52)
         .background(StudioTheme.windowBG)
+        .contentShape(Rectangle())
+        // Double-click on empty header space toggles the standard window zoom: fill the
+        // screen's visible frame, double-click again to restore the previous size.
+        .onTapGesture(count: 2) { NSApp.keyWindow?.zoom(nil) }
     }
 
     private func iconButton(_ symbol: String, help: String,
