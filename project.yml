@@ -24,7 +24,7 @@ targets:
         MARKETING_VERSION: 0.1.0
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_LSUIElement: NO
         INFOPLIST_KEY_NSCameraUsageDescription: "OpenCharm records your webcam to overlay it on screen recordings."
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "OpenCharm records your microphone narration."
         CODE_SIGN_ENTITLEMENTS: App/OpenCharm.entitlements

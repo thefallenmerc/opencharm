@@ -109,8 +109,8 @@ struct DockView: View {
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.white)
             HStack(spacing: 0) {
-                dockButton(symbol: "xmark", label: nil, help: "Hide dock") {
-                    model.hideDock()
+                dockButton(symbol: "xmark", label: nil, help: "Quit OpenCharm") {
+                    NSApp.terminate(nil)
                 }
                 divider
                 sourceButton(symbol: "display", label: "Display") {

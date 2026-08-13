@@ -42,7 +42,7 @@ final class AppModel: ObservableObject {
         Self.shared = self
         // `engine` is a nested ObservableObject: its own @Published changes only emit on
         // `engine.objectWillChange`, not `self.objectWillChange`. Views that observe only
-        // `model` (DockView, the MenuBarExtra label) would otherwise never
+        // `model` (e.g. DockView) would otherwise never
         // re-render when `engine.state` changes. Forward the signal so they do.
         engine.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
@@ -239,10 +239,6 @@ final class AppModel: ObservableObject {
     func showDock() {
         if dock == nil { dock = DockPanel(content: DockView(model: self)) }
         dock?.orderFront(nil)
-    }
-
-    func hideDock() {
-        dock?.orderOut(nil)
     }
 
     func startDisplayRecording(_ id: CGDirectDisplayID) {

@@ -3,7 +3,8 @@ import SwiftUI
 
 /// The UI is driven from here at launch — recovery check, the floating dock, and the live
 /// webcam bubble — via the standard AppKit launch hook, rather than any lazy SwiftUI scene
-/// content. (The `MenuBarExtra` is now a plain menu; its buttons run immediately.)
+/// content. The app is a regular Dock app (no status-bar item): quitting from the macOS
+/// Dock goes through `applicationShouldTerminate` like any other quit.
 ///
 /// Reaching the app's single `AppModel` instance from an `NSApplicationDelegate` (which SwiftUI
 /// itself constructs, independently of `OpenCharmApp`'s own property wrappers) needs a hand-off:
@@ -22,6 +23,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         AppModel.shared?.applicationShouldTerminate() ?? .terminateNow
     }
+
+    /// Clicking the Dock icon brings the floating dock back if it was ever ordered out.
+    func applicationShouldHandleReopen(_ sender: NSApplication,
+                                       hasVisibleWindows flag: Bool) -> Bool {
+        AppModel.shared?.showDock()
+        return true
+    }
 }
 
 @main
@@ -30,15 +38,8 @@ struct OpenCharmApp: App {
     @StateObject private var model = AppModel()
 
     var body: some Scene {
-        MenuBarExtra {
-            Button("Show Dock") { model.showDock() }
-            Button("Open Project…") { model.openProjectPanel() }
-                .keyboardShortcut("o")
-            Divider()
-            Button("Quit OpenCharm") { NSApp.terminate(nil) }
-        } label: {
-            Image(systemName: model.engine.state == .idle
-                  ? "record.circle" : "record.circle.fill")
-        }
+        // All real UI is AppKit-owned (dock panel, studio window, bubble); SwiftUI just
+        // needs a scene to exist.
+        Settings { EmptyView() }
     }
 }
