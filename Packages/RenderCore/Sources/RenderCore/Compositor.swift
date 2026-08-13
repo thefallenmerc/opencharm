@@ -21,7 +21,7 @@ public final class Compositor {
 
     public func render(_ inputs: RenderInputs, settings: RenderSettings,
                        canvasSize: CGSize, zoom: ZoomState = .identity,
-                       cursor: CursorFrame? = nil) -> CIImage {
+                       cursor: CursorFrame? = nil, blurRects: [CGRect] = []) -> CIImage {
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
         var layout = CanvasLayout.compute(
             canvasSize: canvasSize,
@@ -49,6 +49,11 @@ public final class Compositor {
         }
         stage = place(inputs.screen, in: layout.contentRect,
                       cornerRadius: layout.cornerRadius, over: stage)
+        // Privacy blurs sit on the content, before the cursor (which stays sharp above them)
+        // and before the zoom (so a magnified region keeps its mask glued to the content).
+        if !blurRects.isEmpty {
+            stage = privacyBlurLayer(stage, rects: blurRects, contentRect: layout.contentRect)
+        }
         if let cursor {
             stage = drawCursor(cursor, contentRect: layout.contentRect,
                                canvasSize: canvasSize, over: stage)
@@ -143,6 +148,33 @@ public final class Compositor {
             return scaled.transformed(by: .init(translationX: -dx, y: -dy))
                 .cropped(to: canvasRect)
         }
+    }
+
+    /// Blurs each normalized content-space region (0…1, top-left origin) of the staged canvas
+    /// beyond legibility. The blurred patch is clipped to a rounded rect via source-in
+    /// compositing — real transparency outside the shape, so no out-of-extent sampling can
+    /// smear it (see the webcam shadow fix for the failure mode this avoids).
+    func privacyBlurLayer(_ image: CIImage, rects: [CGRect], contentRect: CGRect) -> CIImage {
+        var out = image
+        for r in rects {
+            let px = CGRect(
+                x: contentRect.minX + r.minX * contentRect.width,
+                y: contentRect.minY + (1 - r.minY - r.height) * contentRect.height, // y-up
+                width: r.width * contentRect.width,
+                height: r.height * contentRect.height)
+                .intersection(contentRect)
+            guard px.width > 1, px.height > 1 else { continue }
+            // Strong enough that a password-sized box is unreadable at any export size.
+            let sigma = min(60, max(8, min(px.width, px.height) * 0.35))
+            let blurred = out.clampedToExtent()
+                .applyingGaussianBlur(sigma: sigma)
+                .cropped(to: px)
+            let shape = roundedRectMask(rect: px, radius: min(px.width, px.height) * 0.15)
+            let clipped = blurred.applyingFilter("CISourceInCompositing",
+                                                 parameters: [kCIInputBackgroundImageKey: shape])
+            out = clipped.composited(over: out)
+        }
+        return out
     }
 
     func roundedRectMask(rect: CGRect, radius: CGFloat) -> CIImage {

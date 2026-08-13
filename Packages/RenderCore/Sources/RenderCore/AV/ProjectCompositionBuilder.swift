@@ -61,6 +61,7 @@ public enum ProjectCompositionBuilder {
             ?? AutoZoom.segments(clicks: clicks, settings: settings.autoZoom ?? .default)
         var samples = cursorSamples
         var clickTimes = clicks.map(\.time).sorted()
+        var blurBoxes = settings.blurBoxes ?? []
 
         // Deleted segments: preview keeps the full composition (playback skips them); export
         // removes them for real, shifting every time-domain input onto the edited clock.
@@ -78,6 +79,12 @@ public enum ProjectCompositionBuilder {
                              cursorType: $0.cursorType)
             }
             clickTimes = clickTimes.map { CutClock.map($0, cuts: cuts) }
+            blurBoxes = blurBoxes.compactMap { box in
+                var b = box
+                b.start = CutClock.map(box.start, cuts: cuts)
+                b.end = CutClock.map(box.end, cuts: cuts)
+                return b.end - b.start > 0.05 ? b : nil // fully inside a removed segment
+            }
         }
         if retimeForExport, abs(speed - 1) > 0.001 {
             let full = CMTimeRange(start: .zero, duration: composition.duration)
@@ -90,6 +97,7 @@ public enum ProjectCompositionBuilder {
                 CursorSample(time: $0.time / speed, point: $0.point, cursorType: $0.cursorType)
             }
             clickTimes = clickTimes.map { $0 / speed }
+            blurBoxes = blurBoxes.map { $0.scaled(by: 1 / speed) }
         }
 
         let videoComposition = AVMutableVideoComposition()
@@ -104,7 +112,7 @@ public enum ProjectCompositionBuilder {
             cursorSamples: samples, cursorImage: cursorImage,
             cursorHandImage: cursorHandImage,
             cursorSize: settings.cursorSize ?? 0.04,
-            clickTimes: clickTimes)]
+            clickTimes: clickTimes, blurBoxes: blurBoxes)]
 
         var audioMix: AVAudioMix?
         if !mixParams.isEmpty {

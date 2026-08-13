@@ -23,13 +23,14 @@ final class CharmInstruction: NSObject, AVVideoCompositionInstructionProtocol {
     let cursorHandImage: CIImage?
     let cursorSize: Double
     let clickTimes: [Double]
+    let blurBoxes: [BlurBoxSpec]
 
     init(timeRange: CMTimeRange, screenTrackID: CMPersistentTrackID,
          webcamTrackID: CMPersistentTrackID?, settings: RenderSettings,
          backgroundImage: CIImage?, zoomSegments: [ZoomSegment] = [],
          cursorSamples: [CursorSample] = [], cursorImage: CIImage? = nil,
          cursorHandImage: CIImage? = nil, cursorSize: Double = 0.04,
-         clickTimes: [Double] = []) {
+         clickTimes: [Double] = [], blurBoxes: [BlurBoxSpec] = []) {
         self.timeRange = timeRange
         self.screenTrackID = screenTrackID
         self.webcamTrackID = webcamTrackID
@@ -41,6 +42,7 @@ final class CharmInstruction: NSObject, AVVideoCompositionInstructionProtocol {
         self.cursorHandImage = cursorHandImage
         self.cursorSize = cursorSize
         self.clickTimes = clickTimes
+        self.blurBoxes = blurBoxes
     }
 }
 
@@ -125,7 +127,8 @@ public final class CharmVideoCompositor: NSObject, AVVideoCompositing {
         let rendered = compositor.render(
             RenderInputs(screen: screenImage, webcam: webcamImage,
                          backgroundImage: instruction.backgroundImage),
-            settings: instruction.settings, canvasSize: canvasSize, zoom: zoom, cursor: cursor)
+            settings: instruction.settings, canvasSize: canvasSize, zoom: zoom, cursor: cursor,
+            blurRects: BlurBoxSpec.activeRects(instruction.blurBoxes, at: t))
         context.render(rendered, to: output)
         request.finish(withComposedVideoFrame: output)
     }

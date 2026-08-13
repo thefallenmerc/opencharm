@@ -107,6 +107,8 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     /// Deleted segments (original-composition seconds). Preview skips them; export removes them.
     /// Additive/optional.
     public var cuts: [CutRange]?
+    /// Timeline-scoped privacy blur regions over the screen content. Additive/optional.
+    public var blurBoxes: [BlurBoxSpec]?
 
     public init(background: Background, paddingFraction: Double, cornerRadiusFraction: Double,
                 shadow: ShadowSettings, webcam: WebcamSettings,
@@ -114,7 +116,8 @@ public struct RenderSettings: Codable, Equatable, Sendable {
                 zooms: [ZoomSpec]? = nil, trimStart: Double? = nil, trimEnd: Double? = nil,
                 cursorSize: Double? = nil, aspect: AspectPreset? = nil,
                 playbackSpeed: Double? = nil, backgroundBlur: Double? = nil,
-                splits: [Double]? = nil, cuts: [CutRange]? = nil) {
+                splits: [Double]? = nil, cuts: [CutRange]? = nil,
+                blurBoxes: [BlurBoxSpec]? = nil) {
         self.background = background
         self.paddingFraction = paddingFraction
         self.cornerRadiusFraction = cornerRadiusFraction
@@ -130,6 +133,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         self.backgroundBlur = backgroundBlur
         self.splits = splits
         self.cuts = cuts
+        self.blurBoxes = blurBoxes
     }
 
     public static let `default` = RenderSettings(
