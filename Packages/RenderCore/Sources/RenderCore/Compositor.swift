@@ -190,11 +190,19 @@ public final class Compositor {
         let square = webcam.cropped(to: crop)
         var result = background
         let rect = layout.webcamRect
-        let mask = squircleMask(rect: rect, roundness: settings.webcam.roundness)
+        // The mask bitmap carries a transparent border wider than the shadow's reach. The
+        // squircle touches its bounding box at each side's midpoint, so a mask that stops
+        // exactly at `rect` puts opaque pixels on its own extent edge — and anything that
+        // samples past the extent (the shadow blur, blendWithMask on the GPU) then smears
+        // those edge pixels into bars beside the bubble with a hard cutoff. Real transparent
+        // pixels beyond the silhouette make out-of-extent clamping harmless.
+        let sigma = max(3, rect.width * 0.045)
+        let shadowOffset = rect.width * 0.03
+        let pad = (4 * sigma + shadowOffset).rounded(.up)
+        let mask = squircleMask(rect: rect, roundness: settings.webcam.roundness, padding: pad)
         // Elegant drop shadow under the bubble: the squircle's own silhouette (so the shape
         // always matches, circle or squircle), softly blurred with a slight downward offset.
         if settings.shadow.opacity > 0 {
-            let sigma = max(3, rect.width * 0.045)
             let silhouette = mask.applyingFilter("CIColorMatrix", parameters: [
                 "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0),
                 "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 0),
@@ -202,10 +210,9 @@ public final class Compositor {
                 "inputAVector": CIVector(x: 0, y: 0, z: 0, w: settings.shadow.opacity * 0.55),
             ])
             let dropShadow = silhouette
-                .transformed(by: .init(translationX: 0, y: -rect.width * 0.03)) // y-up: downward
-                .clampedToExtent()
+                .transformed(by: .init(translationX: 0, y: -shadowOffset)) // y-up: downward
                 .applyingGaussianBlur(sigma: sigma)
-                .cropped(to: rect.insetBy(dx: -4 * sigma, dy: -4 * sigma))
+                .cropped(to: rect.insetBy(dx: -pad, dy: -pad))
             result = dropShadow.composited(over: result)
         }
         // Squircle bubble: continuous icon-like corners (superellipse), not a plain rounded rect.
@@ -225,11 +232,12 @@ public final class Compositor {
     /// White superellipse (|x|ⁿ + |y|ⁿ = 1) on transparent, filling `rect`. The exponent maps
     /// from `roundness` so 1 stays a circle/ellipse (n = 2) and lower values tighten toward a
     /// square with continuous, icon-like corners (e.g. 0.65 → n ≈ 3.1).
-    func squircleMask(rect: CGRect, roundness: Double) -> CIImage {
+    func squircleMask(rect: CGRect, roundness: Double, padding: CGFloat = 0) -> CIImage {
         let n = 2.0 / min(max(roundness, 0.05), 1)
         let w = max(Int(rect.width.rounded()), 2)
         let h = max(Int(rect.height.rounded()), 2)
-        let key = "\(w)x\(h):\(Int(n * 100))"
+        let p = max(0, Int(padding.rounded(.up)))
+        let key = "\(w)x\(h):\(Int(n * 100)):\(p)"
         maskLock.lock()
         defer { maskLock.unlock() }
         let base: CIImage
@@ -237,7 +245,7 @@ public final class Compositor {
             base = hit
         } else {
             guard let ctx = CGContext(
-                data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                data: nil, width: w + 2 * p, height: h + 2 * p, bitsPerComponent: 8, bytesPerRow: 0,
                 space: CGColorSpaceCreateDeviceRGB(),
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return .empty() }
             let a = Double(w) / 2, b = Double(h) / 2
@@ -246,8 +254,8 @@ public final class Compositor {
             for i in 0...steps {
                 let t = Double(i) / Double(steps) * 2 * .pi
                 let c = cos(t), s = sin(t)
-                let x = a + a * (c < 0 ? -1 : 1) * pow(abs(c), 2 / n)
-                let y = b + b * (s < 0 ? -1 : 1) * pow(abs(s), 2 / n)
+                let x = Double(p) + a + a * (c < 0 ? -1 : 1) * pow(abs(c), 2 / n)
+                let y = Double(p) + b + b * (s < 0 ? -1 : 1) * pow(abs(s), 2 / n)
                 if i == 0 { path.move(to: CGPoint(x: x, y: y)) }
                 else { path.addLine(to: CGPoint(x: x, y: y)) }
             }
@@ -259,6 +267,7 @@ public final class Compositor {
             base = CIImage(cgImage: cg)
             maskCache[key] = base
         }
-        return base.transformed(by: .init(translationX: rect.minX, y: rect.minY))
+        return base.transformed(by: .init(translationX: rect.minX - CGFloat(p),
+                                          y: rect.minY - CGFloat(p)))
     }
 }
