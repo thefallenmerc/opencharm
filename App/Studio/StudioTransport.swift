@@ -106,6 +106,7 @@ struct StudioTransport: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(StudioTheme.textSecondary)
                     .help("Reset timeline zoom")
+                    .cursor(.pointingHand)
                 }
                 Spacer()
                 // Right: Cut splits the video at the playhead into segments.
@@ -131,6 +132,7 @@ struct StudioTransport: View {
                     .stroke(StudioTheme.chipBorder, lineWidth: 1))
         }
         .buttonStyle(.plain)
+        .cursor(.pointingHand)
     }
 
     // MARK: selected-zoom editor
@@ -270,6 +272,7 @@ struct StudioTransport: View {
         }
         .frame(width: capW, height: height)
         .contentShape(Rectangle())
+        .cursor(.resizeLeftRight)
     }
 
     private func edgeDrag(_ pps: Double, _ set: @escaping (Double) -> Void) -> some Gesture {
@@ -329,6 +332,7 @@ struct StudioTransport: View {
                 .gesture(resizeDrag(spec, pps: pps, leading: false))
         }
         .offset(x: x, y: 1)
+        .cursor(.pointingHand)
         .onTapGesture { selectedID = selected ? nil : spec.id }
         .gesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(space))
             .onChanged { v in

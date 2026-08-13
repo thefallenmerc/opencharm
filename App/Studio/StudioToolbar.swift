@@ -66,5 +66,6 @@ struct StudioToolbar: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        .cursor(.pointingHand)
     }
 }

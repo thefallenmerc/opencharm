@@ -12,6 +12,16 @@ enum StudioTheme {
     static let cornerRadius: CGFloat = 10
 }
 
+extension View {
+    /// Shows `cursor` while the pointer hovers this view. (`.pointerStyle` needs macOS 15;
+    /// the app targets 14.)
+    func cursor(_ cursor: NSCursor) -> some View {
+        onHover { inside in
+            if inside { cursor.push() } else { NSCursor.pop() }
+        }
+    }
+}
+
 /// The dark rounded "chip" every toolbar/transport button uses.
 struct ChipButtonStyle: ButtonStyle {
     var prominent = false
@@ -27,6 +37,7 @@ struct ChipButtonStyle: ButtonStyle {
             .overlay(RoundedRectangle(cornerRadius: StudioTheme.cornerRadius)
                 .stroke(StudioTheme.chipBorder, lineWidth: prominent ? 0 : 1))
             .opacity(configuration.isPressed ? 0.75 : 1)
+            .cursor(.pointingHand)
     }
 }
 
@@ -55,6 +66,7 @@ struct SegmentChips<T: Hashable>: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .cursor(.pointingHand)
             }
         }
     }

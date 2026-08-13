@@ -48,6 +48,7 @@ struct SidebarRail: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .cursor(.pointingHand)
             }
             Spacer()
         }
