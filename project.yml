@@ -12,7 +12,11 @@ targets:
   OpenCharm:
     type: application
     platform: macOS
-    sources: [App]
+    sources:
+      - path: App
+        excludes: ["Resources/Music/**"]
+      - path: App/Resources/Music
+        type: folder
     dependencies:
       - package: RenderCore
       - package: AudioPipeline

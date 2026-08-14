@@ -143,6 +143,11 @@ final class StylingModel: ObservableObject {
                                startOffset: sys.startOffset,
                                volume: audioSettings.systemVolume))
         }
+        if let music = audioSettings.music,
+           let url = resolveMusicURL(music.source, packageURL: packageURL) {
+            audio.append(.init(url: url, startOffset: 0, volume: music.volume,
+                               isMusic: true, loops: music.loop))
+        }
         return MediaTimeline(
             screen: .init(url: packageURL.appendingPathComponent(manifest.screen.filename),
                           startOffset: manifest.screen.startOffset),
@@ -151,6 +156,19 @@ final class StylingModel: ObservableObject {
                       startOffset: $0.startOffset)
             },
             audio: audio)
+    }
+
+    /// Resolves a `MusicSettings.source` to a playable file URL: `"preset:<name>"` looks up a
+    /// bundled track in `App/Resources/Music`; anything else is a package-relative filename
+    /// (a user-chosen file `setMusicFile` copied in). Missing either way → `nil`, so the caller
+    /// skips music gracefully instead of failing the whole build.
+    nonisolated static func resolveMusicURL(_ source: String, packageURL: URL) -> URL? {
+        if source.hasPrefix("preset:") {
+            let name = String(source.dropFirst("preset:".count))
+            return Bundle.main.url(forResource: name, withExtension: "mp3", subdirectory: "Music")
+        }
+        let url = packageURL.appendingPathComponent(source)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
     func resolvedBackgroundImage() -> CIImage? {
@@ -162,6 +180,49 @@ final class StylingModel: ObservableObject {
             return CIImage(contentsOf: url)
         }
         return CIImage(contentsOf: URL(fileURLWithPath: path))
+    }
+
+    // MARK: Background music
+
+    /// Selects a bundled preset, or clears music entirely with `nil`. Mutates `audioSettings`
+    /// (its `didSet` → `audioSettingsChanged` → a full `rebuildComposition`, the correct path
+    /// for anything that touches the audio mix).
+    func setMusicPreset(_ name: String?) {
+        deleteCopiedMusicFile()
+        guard let name else { audioSettings.music = nil; return }
+        audioSettings.music = MusicSettings(source: "preset:\(name)",
+                                            volume: audioSettings.music?.volume ?? 0.4,
+                                            loop: audioSettings.music?.loop ?? true)
+    }
+
+    /// Copies a user-chosen audio file into the package as `music.<ext>` (replacing any
+    /// previous copy first) so the project stays portable — never stores the absolute external
+    /// path the user picked it from.
+    func setMusicFile(_ url: URL) {
+        deleteCopiedMusicFile()
+        let ext = url.pathExtension.isEmpty ? "mp3" : url.pathExtension
+        let filename = "music.\(ext)"
+        do {
+            try FileManager.default.copyItem(
+                at: url, to: package.url.appendingPathComponent(filename))
+        } catch {
+            errorMessage = "Couldn't add that music file: \(error.localizedDescription)"
+            return
+        }
+        audioSettings.music = MusicSettings(source: filename,
+                                            volume: audioSettings.music?.volume ?? 0.4,
+                                            loop: audioSettings.music?.loop ?? true)
+    }
+
+    /// Removes any previously copied `music.*` file from the package dir. A preset source isn't
+    /// a copied file (it's `"preset:<name>"`, resolved against the app bundle), so this only
+    /// acts when the current source is package-relative — called before switching to a preset
+    /// or a new custom file so switching never leaves an orphaned copy behind.
+    private func deleteCopiedMusicFile() {
+        guard let source = audioSettings.music?.source, !source.hasPrefix("preset:") else {
+            return
+        }
+        try? FileManager.default.removeItem(at: package.url.appendingPathComponent(source))
     }
 
     // MARK: Timeline zooms & transport

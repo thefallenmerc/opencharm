@@ -38,7 +38,9 @@ public enum ProjectCompositionBuilder {
         if let webcam = timeline.webcam { webcamID = try await addVideo(webcam) }
 
         var mixParams: [AVMutableAudioMixInputParameters] = []
-        for audio in timeline.audio {
+        // Music tracks are handled separately, after cut/speed retiming below — skip them here
+        // so narration/system audio insert exactly as before.
+        for audio in timeline.audio where audio.isMusic != true {
             let asset = AVURLAsset(url: audio.url)
             guard let source = try await asset.loadTracks(withMediaType: .audio).first
             else { continue }
@@ -112,6 +114,56 @@ public enum ProjectCompositionBuilder {
             remappedClicks = remappedClicks.map { ClickEvent(time: $0.time / speed, point: $0.point) }
             blurBoxes = blurBoxes.map { $0.scaled(by: 1 / speed) }
             annotations = annotations.map { $0.scaled(by: 1 / speed) }
+        }
+
+        // Background music: inserted AFTER the cuts/speed retiming above, sized to the FINAL
+        // `composition.duration` — so the bed is one continuous asset laid onto the already-
+        // edited/retimed clock, never chopped by a cut mid-track and never itself time-scaled
+        // by `scaleTimeRange` (that call already ran, against the tracks present before this
+        // point; content added afterward is untouched by it).
+        //
+        // Accepted v1 divergence (iron rule 3): in PREVIEW (`retimeForExport == false`) the
+        // cuts/speed blocks above are skipped, so `composition.duration` here is still the raw,
+        // un-retimed recording length, and a non-1x `playbackSpeed` tempo-shifts the music bed
+        // during playback only because `AVPlayer.defaultRate` scales the whole player's audio
+        // output, music included. Export runs this same code after the real retime, so its
+        // music bed is never tempo-shifted — export is the source of truth.
+        let musicFadeInBase = 0.5   // seconds, 0 → volume
+        let musicFadeOutBase = 1.5  // seconds, volume → 0
+        let finalDuration = composition.duration
+        for music in timeline.audio where music.isMusic == true {
+            guard finalDuration > .zero else { continue }
+            let asset = AVURLAsset(url: music.url)
+            guard let source = try await asset.loadTracks(withMediaType: .audio).first
+            else { continue }
+            let sourceDuration = try await asset.load(.duration)
+            guard sourceDuration > .zero else { continue }
+            let compTrack = composition.addMutableTrack(
+                withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)!
+            let loop = music.loops == true
+            var cursor = CMTime.zero
+            while cursor < finalDuration {
+                let clipDuration = min(sourceDuration, finalDuration - cursor)
+                try compTrack.insertTimeRange(
+                    CMTimeRange(start: .zero, duration: clipDuration), of: source, at: cursor)
+                cursor = cursor + clipDuration
+                if !loop { break } // single insert: truncated if longer, ends early if shorter
+            }
+
+            let params = AVMutableAudioMixInputParameters(track: compTrack)
+            let totalSeconds = finalDuration.seconds
+            // Proportionally shrink both ramps when the whole bed is shorter than their combined
+            // length, so a very short composition still fades fully in and out.
+            let fadeScale = min(1, totalSeconds / (musicFadeInBase + musicFadeOutBase))
+            let fadeIn = CMTime(seconds: musicFadeInBase * fadeScale, preferredTimescale: 600)
+            let fadeOut = CMTime(seconds: musicFadeOutBase * fadeScale, preferredTimescale: 600)
+            let volume = Float(music.volume)
+            params.setVolumeRamp(fromStartVolume: 0, toEndVolume: volume,
+                                 timeRange: CMTimeRange(start: .zero, duration: fadeIn))
+            params.setVolumeRamp(fromStartVolume: volume, toEndVolume: 0,
+                                 timeRange: CMTimeRange(start: finalDuration - fadeOut,
+                                                        duration: fadeOut))
+            mixParams.append(params)
         }
         let clickTimes = remappedClicks.map(\.time)
 
