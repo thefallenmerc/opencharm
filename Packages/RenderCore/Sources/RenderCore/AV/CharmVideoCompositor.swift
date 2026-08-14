@@ -128,6 +128,21 @@ public final class CharmVideoCompositor: NSObject, AVVideoCompositing {
         let tilt = MotionTilt.state(at: t, samples: instruction.cursorSamples,
                                     zoomProgress: zoom.progress,
                                     settings: instruction.settings.motion3D)
+        // Camera velocity for cinematic motion blur: a finite difference of the stateless
+        // ZoomTimeline evaluator straddling `t`, never accumulated frame-to-frame state — safe
+        // under AVFoundation's out-of-order concurrent request queue. Only evaluated when the
+        // feature is actually on, so an off project pays for nothing extra per frame.
+        let eps = 1.0 / 120
+        let camVel: CameraVelocity
+        if (instruction.settings.motionBlur ?? 0) > 0.005 {
+            let zPrev = ZoomTimeline.state(at: t - eps, segments: instruction.zoomSegments,
+                                           cursorTrack: instruction.cursorSamples)
+            let zNext = ZoomTimeline.state(at: t + eps, segments: instruction.zoomSegments,
+                                           cursorTrack: instruction.cursorSamples)
+            camVel = .between(zPrev, zNext, dt: 2 * eps)
+        } else {
+            camVel = .zero
+        }
         // Click effect: resolved once per frame, then gated on synthetic-cursor presence below —
         // legacy recordings with a baked-in system cursor (`cursorArt == nil`) get no effects at
         // all, ripple/sonar/sparkle/spotlight included.
@@ -163,7 +178,7 @@ public final class CharmVideoCompositor: NSObject, AVVideoCompositing {
             blurBoxes: BlurBoxSpec.active(instruction.blurBoxes, at: t),
             annotations: AnnotationSpec.active(instruction.annotations, at: t),
             tilt: tilt, clickEffectKind: clickEffectKind, clickRings: clickRings,
-            clickSpokes: clickSpokes)
+            clickSpokes: clickSpokes, cameraVelocity: camVel)
         context.render(rendered, to: output)
         request.finish(withComposedVideoFrame: output)
     }

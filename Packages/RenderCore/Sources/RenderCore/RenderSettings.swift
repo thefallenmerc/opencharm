@@ -125,6 +125,11 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     /// `nil` = off, and the compositor's identity fast path then renders byte-for-byte what it
     /// rendered before the feature existed.
     public var motion3D: Motion3DSettings?
+    /// Cinematic camera-motion blur strength, 0…1: directional blur while the zoom viewport pans,
+    /// zoom blur during scale ramps. Additive/optional: `nil` = off, and both filters are gated on
+    /// a velocity threshold besides — so it renders byte-for-byte identical to before this feature
+    /// existed whenever it's off, and untouched during any zoom hold (no pan, no scale ramp).
+    public var motionBlur: Double?
 
     public init(background: Background, paddingFraction: Double, cornerRadiusFraction: Double,
                 shadow: ShadowSettings, webcam: WebcamSettings,
@@ -136,7 +141,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
                 playbackSpeed: Double? = nil, backgroundBlur: Double? = nil,
                 splits: [Double]? = nil, cuts: [CutRange]? = nil,
                 blurBoxes: [BlurBoxSpec]? = nil, annotations: [AnnotationSpec]? = nil,
-                motion3D: Motion3DSettings? = nil) {
+                motion3D: Motion3DSettings? = nil, motionBlur: Double? = nil) {
         self.background = background
         self.paddingFraction = paddingFraction
         self.cornerRadiusFraction = cornerRadiusFraction
@@ -157,6 +162,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         self.blurBoxes = blurBoxes
         self.annotations = annotations
         self.motion3D = motion3D
+        self.motionBlur = motionBlur
     }
 
     public static let `default` = RenderSettings(

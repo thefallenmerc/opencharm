@@ -30,7 +30,8 @@ public final class Compositor {
                        tilt: TiltState = .identity,
                        clickEffectKind: ClickEffectKind = .pulse,
                        clickRings: [ClickEffects.Ring] = [],
-                       clickSpokes: [ClickEffects.Spoke] = []) -> CIImage {
+                       clickSpokes: [ClickEffects.Spoke] = [],
+                       cameraVelocity: CameraVelocity = .zero) -> CIImage {
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
         var layout = CanvasLayout.compute(
             canvasSize: canvasSize,
@@ -94,6 +95,17 @@ public final class Compositor {
         stage = zoomedCanvas(stage, zoom: zoom, contentRect: layout.contentRect,
                              canvasRect: canvasRect)
 
+        // Cinematic camera-motion blur: applied to the zoomed stage, before the webcam layer, so
+        // the bubble (composited next, at a constant size) never blurs. Identity contract: `nil`/
+        // ≈0 amount skips this block entirely — no filter is even constructed, let alone applied —
+        // so the untouched-pixels guarantee holds for every project made before this feature.
+        let motionBlurAmount = min(max(settings.motionBlur ?? 0, 0), 1)
+        if motionBlurAmount > 0.005 {
+            stage = motionBlurred(stage, zoom: zoom, velocity: cameraVelocity,
+                                  amount: motionBlurAmount, contentRect: layout.contentRect,
+                                  canvasRect: canvasRect)
+        }
+
         // The webcam floats above the zoom (it never magnifies) at a constant size — the
         // default bubble is already small enough to stay unobtrusive over magnified content.
         var result = webcamLayer(inputs.webcam, settings: settings, layout: layout, over: stage)
@@ -118,6 +130,59 @@ public final class Compositor {
             .scaledBy(x: s, y: s)
             .translatedBy(x: -fx, y: -fy)
         return image.transformed(by: transform).cropped(to: canvasRect)
+    }
+
+    /// Cinematic camera-motion blur, applied to the already-zoomed stage: directional blur while
+    /// the viewport pans, zoom blur while its scale is ramping. Each is independently gated on a
+    /// velocity threshold — a held zoom (both rates ~0) falls through both `if`s untouched, so
+    /// holds render exactly like the no-blur path. Anti-smear discipline matches every other
+    /// blur in this file: `clampedToExtent()` before the filter (so it doesn't sample transparent
+    /// black past the edge), `.cropped(to: canvasRect)` after (so the filter's extent-padding
+    /// never leaks into compositing).
+    func motionBlurred(_ image: CIImage, zoom: ZoomState, velocity: CameraVelocity, amount: Double,
+                       contentRect: CGRect, canvasRect: CGRect) -> CIImage {
+        var stage = image
+
+        // Pan → directional blur. `pxPerSec` is the focus's on-canvas speed: its normalized
+        // content-space rate scaled into content pixels, then by the current zoom scale (the same
+        // pan reads faster once magnified, exactly like `zoomedCanvas` scales the whole stage).
+        let pxPerSec = hypot(velocity.focusRate.dx * contentRect.width,
+                             velocity.focusRate.dy * contentRect.height) * CGFloat(zoom.scale)
+        if pxPerSec > 80 {
+            // k = 0.06, chosen so a brisk ~400 px/s pan at full amount (1) lands right at the
+            // radius cap (400 * 0.06 = 24); slower pans and lower amounts scale down linearly from
+            // there, and the cap keeps even a very fast pan from smearing past legibility.
+            let k = 0.06
+            let radius = min(24, k * Double(pxPerSec) * amount)
+            // CI's angle is measured y-up. The focus rate lives in the recorded, TOP-LEFT-origin
+            // normalized space (dy > 0 = moving down), matching `zoomedCanvas`'s own fy flip
+            // (`contentRect.maxY - focus.y * height`) — so the on-screen travel direction is
+            // (dx, -dy), and negating dy converts it to the y-up angle CIMotionBlur expects.
+            let angle = atan2(-Double(velocity.focusRate.dy), Double(velocity.focusRate.dx))
+            let blur = CIFilter.motionBlur()
+            blur.inputImage = stage.clampedToExtent()
+            blur.radius = Float(radius)
+            blur.angle = Float(angle)
+            stage = (blur.outputImage ?? stage).cropped(to: canvasRect)
+        }
+
+        // Scale ramp → zoom blur, centered on the same focus point `zoomedCanvas` scales about
+        // (identical fx/fy math, so the blur's center always matches where the zoom is anchored).
+        if abs(velocity.scaleRate) > 0.5 {
+            // k2 = 8, chosen so a scale rate of 1.5/s (1× → 2.5× default zoom level, eased, in
+            // under a second) at full amount lands near the middle of CIZoomBlur's useful range;
+            // the 12 cap keeps extreme ramps from turning fully illegible.
+            let k2 = 8.0
+            let zoomAmount = min(12, k2 * abs(velocity.scaleRate) * amount)
+            let fx = contentRect.minX + CGFloat(zoom.focus.x) * contentRect.width
+            let fy = contentRect.maxY - CGFloat(zoom.focus.y) * contentRect.height // y-up
+            let blur = CIFilter.zoomBlur()
+            blur.inputImage = stage.clampedToExtent()
+            blur.center = CGPoint(x: fx, y: fy)
+            blur.amount = Float(zoomAmount)
+            stage = (blur.outputImage ?? stage).cropped(to: canvasRect)
+        }
+        return stage
     }
 
     /// Draws the synthetic pointer at the cursor's content location, pre-zoom — the canvas zoom

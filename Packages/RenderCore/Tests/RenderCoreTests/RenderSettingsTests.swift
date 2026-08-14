@@ -63,5 +63,18 @@ final class RenderSettingsTests: XCTestCase {
         XCTAssertNil(s.motion3D) // 3D motion is additive too: absent = off, renders flat
         XCTAssertNil(s.cursorStyle) // cursor styles are additive too: absent = classic
         XCTAssertNil(s.clickEffect) // click effects are additive too: absent = pulse
+        XCTAssertNil(s.motionBlur) // motion blur is additive too: absent = off, no camera velocity
+    }
+
+    func testMotionBlurRoundTripAndLegacyDecode() throws {
+        XCTAssertNil(RenderSettings.default.motionBlur, "off unless a project opts in")
+        let decoded = try JSONDecoder().decode(
+            RenderSettings.self, from: JSONEncoder().encode(RenderSettings.default))
+        XCTAssertNil(decoded.motionBlur)
+
+        var s = RenderSettings.default
+        s.motionBlur = 0.65
+        let back = try JSONDecoder().decode(RenderSettings.self, from: JSONEncoder().encode(s))
+        XCTAssertEqual(back.motionBlur, s.motionBlur)
     }
 }

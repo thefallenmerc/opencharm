@@ -46,6 +46,9 @@ struct GeneralPanel: View {
                         StudioSlider(label: "Strength", value: motion3DStrength, range: 0...1)
                     }
                 }
+                PanelSection(title: "Cinematic Blur", subtitle: "Blurs fast zoom and pan motion") {
+                    StudioSlider(label: "Amount", value: motionBlur, range: 0...1)
+                }
                 PanelSection(title: "Canvas") {
                     StudioSlider(label: "Padding",
                                  value: $model.renderSettings.paddingFraction, range: 0...0.25)
@@ -224,6 +227,11 @@ struct GeneralPanel: View {
     private var backgroundBlur: Binding<Double> {
         Binding { model.renderSettings.backgroundBlur ?? 0 }
         set: { model.renderSettings.backgroundBlur = $0 < 0.005 ? nil : $0 }
+    }
+
+    private var motionBlur: Binding<Double> {
+        Binding { model.renderSettings.motionBlur ?? 0 }
+        set: { model.renderSettings.motionBlur = $0 < 0.005 ? nil : $0 }
     }
 
     private var zoomLevel: Binding<Double> {
