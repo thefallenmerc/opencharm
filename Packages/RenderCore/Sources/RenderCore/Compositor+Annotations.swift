@@ -75,7 +75,9 @@ extension Compositor {
                                       width: px.width, height: px.height, pad: pad)
         let positioned = sprite.transformed(by: .init(
             translationX: px.minX - pad, y: px.minY - pad))
-        return positioned.composited(over: stage)
+        // Clamp to the content bounds, same as `privacyBlurLayer`'s `.intersection(contentRect)`:
+        // a rect flush against a content edge must not bleed sprite pixels into the padding.
+        return positioned.cropped(to: contentRect).composited(over: stage)
     }
 
     private func cachedTextSprite(text: String, fontSize: CGFloat, color: RGBAColor,
@@ -133,7 +135,9 @@ extension Compositor {
                                        color: color, fillOpacity: fillOpacity)
         let positioned = sprite.transformed(by: .init(
             translationX: px.minX - pad, y: px.minY - pad))
-        return positioned.composited(over: stage)
+        // Clamp to the content bounds, same as `privacyBlurLayer`'s `.intersection(contentRect)`:
+        // a rect flush against a content edge must not bleed sprite pixels into the padding.
+        return positioned.cropped(to: contentRect).composited(over: stage)
     }
 
     private func cachedShapeSprite(ellipse: Bool, width: CGFloat, height: CGFloat, strokePx: CGFloat,
@@ -202,7 +206,10 @@ extension Compositor {
                                        strokePx: strokePx, headSize: headSize, color: color)
         let positioned = sprite.transformed(by: .init(
             translationX: bbox.minX - pad, y: bbox.minY - pad))
-        return positioned.composited(over: stage)
+        // Clamp to the content bounds, same as `privacyBlurLayer`'s `.intersection(contentRect)`:
+        // an arrow whose endpoint sits at a content edge must not bleed sprite pixels into the
+        // padding.
+        return positioned.cropped(to: contentRect).composited(over: stage)
     }
 
     private func cachedArrowSprite(width: Int, height: Int, pad: CGFloat, p1: CGPoint, p2: CGPoint,

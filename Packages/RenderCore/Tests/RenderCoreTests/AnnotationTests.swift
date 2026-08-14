@@ -144,6 +144,34 @@ final class AnnotationTests: XCTestCase {
             "rectangle sprite must not leak outside its box")
     }
 
+    /// An arrow whose tip sits exactly at the content's top edge (`arrowEnd.y == 0`, a normal
+    /// in-range value), pointing straight up. The shaft's round line cap extends strokeWidth/2
+    /// further in the line direction than the tip itself — so, uncropped, it would bleed past
+    /// the content boundary into the padding above. Must not change any pixel there, mirroring
+    /// `privacyBlurLayer`'s `.intersection(contentRect)` clamp. (Rectangle/ellipse sprites are
+    /// inset by half their stroke width so their outer edge never exceeds `rect`'s own bounds;
+    /// arrows' round caps are the case that actually overshoots.)
+    func testAnnotationFlushAgainstContentEdgeDoesNotBleedIntoPadding() {
+        let s = plainSettings
+        let screen = plainScreen
+        let spec = AnnotationSpec(id: "edge", kind: "arrow", start: 0, end: 1,
+                                  rect: CGRect(x: 0.3, y: 0, width: 0.1, height: 0.5),
+                                  color: RGBAColor(r: 1, g: 1, b: 1, a: 1), strokeWidth: 0.05,
+                                  arrowStart: CGPoint(x: 0.4, y: 0.5), arrowEnd: CGPoint(x: 0.4, y: 0))
+        let plain = GoldenAssert.cgImage(Compositor().render(
+            RenderInputs(screen: screen), settings: s, canvasSize: canvas))
+        let annotated = GoldenAssert.cgImage(Compositor().render(
+            RenderInputs(screen: screen), settings: s, canvasSize: canvas, annotations: [spec]))
+
+        // A strip of the padding just above the content's top edge (content top ≈ canvas y=15.6
+        // for this 400×260 canvas / 320×200 screen layout — see the canvas comment above):
+        // must be pixel-identical whether or not the annotation is present.
+        let paddingAboveContent = CGRect(x: 145, y: 3, width: 40, height: 8)
+        XCTAssertLessThan(
+            GoldenAssert.meanAbsDiff(region(plain, paddingAboveContent), region(annotated, paddingAboveContent)),
+            0.001, "annotation flush against the content edge must not bleed into the padding")
+    }
+
     func testTextAnnotationChangesPixelsInsideItsRect() {
         let s = plainSettings
         let screen = plainScreen
