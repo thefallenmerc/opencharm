@@ -22,6 +22,11 @@ final class CharmInstruction: NSObject, AVVideoCompositionInstructionProtocol {
     let cursorArt: CursorArt?
     let cursorSize: Double
     let clickTimes: [Double]
+    /// Full click events (time + point), cut-remapped and speed-scaled identically to
+    /// `clickTimes` (same single remap pass in `ProjectCompositionBuilder` — see its comment for
+    /// why they're guaranteed to stay in parity). Drives ripple/sonar/sparkle click effects,
+    /// which need the click's position as well as its time.
+    let clickEvents: [ClickEvent]
     let blurBoxes: [BlurBoxSpec]
     let annotations: [AnnotationSpec]
 
@@ -30,7 +35,8 @@ final class CharmInstruction: NSObject, AVVideoCompositionInstructionProtocol {
          backgroundImage: CIImage?, zoomSegments: [ZoomSegment] = [],
          cursorSamples: [CursorSample] = [], cursorArt: CursorArt? = nil,
          cursorSize: Double = 0.04,
-         clickTimes: [Double] = [], blurBoxes: [BlurBoxSpec] = [],
+         clickTimes: [Double] = [], clickEvents: [ClickEvent] = [],
+         blurBoxes: [BlurBoxSpec] = [],
          annotations: [AnnotationSpec] = []) {
         self.timeRange = timeRange
         self.screenTrackID = screenTrackID
@@ -42,6 +48,7 @@ final class CharmInstruction: NSObject, AVVideoCompositionInstructionProtocol {
         self.cursorArt = cursorArt
         self.cursorSize = cursorSize
         self.clickTimes = clickTimes
+        self.clickEvents = clickEvents
         self.blurBoxes = blurBoxes
         self.annotations = annotations
     }
@@ -121,7 +128,13 @@ public final class CharmVideoCompositor: NSObject, AVVideoCompositing {
         let tilt = MotionTilt.state(at: t, samples: instruction.cursorSamples,
                                     zoomProgress: zoom.progress,
                                     settings: instruction.settings.motion3D)
+        // Click effect: resolved once per frame, then gated on synthetic-cursor presence below —
+        // legacy recordings with a baked-in system cursor (`cursorArt == nil`) get no effects at
+        // all, ripple/sonar/sparkle/spotlight included.
+        let clickEffectKind = ClickEffectKind.resolve(instruction.settings.clickEffect)
         var cursor: CursorFrame?
+        var clickRings: [ClickEffects.Ring] = []
+        var clickSpokes: [ClickEffects.Spoke] = []
         if let art = instruction.cursorArt,
            let sample = CursorTrack.sample(at: t, samples: instruction.cursorSamples) {
             // Pointer shape follows the recorded cursor type; the click pulse shrinks it
@@ -131,9 +144,17 @@ public final class CharmVideoCompositor: NSObject, AVVideoCompositing {
             let usesHand = sample.cursorType == "pointingHand" && art.hand != nil
             let image = usesHand ? art.hand! : art.arrow
             let hotspot = usesHand ? art.handHotspot : art.hotspot
-            let pulse = CursorPulse.scale(at: t, clicks: instruction.clickTimes)
+            // "none" turns the pulse haptic off; every other kind (incl. nil/"pulse") keeps it —
+            // the new ring/spoke/spotlight effects compose with the pulse, they don't replace it.
+            let pulse = ClickEffects.pulseEnabled(clickEffectKind)
+                ? CursorPulse.scale(at: t, clicks: instruction.clickTimes) : 1.0
             cursor = CursorFrame(image: image, point: sample.point,
                                  sizeFraction: instruction.cursorSize * pulse, hotspot: hotspot)
+            clickRings = ClickEffects.rings(at: t, clicks: instruction.clickEvents,
+                                            kind: clickEffectKind)
+            if clickEffectKind == .sparkle {
+                clickSpokes = ClickEffects.spokes(at: t, clicks: instruction.clickEvents)
+            }
         }
         let rendered = compositor.render(
             RenderInputs(screen: screenImage, webcam: webcamImage,
@@ -141,7 +162,8 @@ public final class CharmVideoCompositor: NSObject, AVVideoCompositing {
             settings: instruction.settings, canvasSize: canvasSize, zoom: zoom, cursor: cursor,
             blurBoxes: BlurBoxSpec.active(instruction.blurBoxes, at: t),
             annotations: AnnotationSpec.active(instruction.annotations, at: t),
-            tilt: tilt)
+            tilt: tilt, clickEffectKind: clickEffectKind, clickRings: clickRings,
+            clickSpokes: clickSpokes)
         context.render(rendered, to: output)
         request.finish(withComposedVideoFrame: output)
     }

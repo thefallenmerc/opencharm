@@ -16,7 +16,11 @@ extension Compositor {
     func tiltedContentLayer(_ inputs: RenderInputs, settings: RenderSettings,
                             layout: CanvasLayout, canvasSize: CGSize, tilt: TiltState,
                             blurBoxes: [BlurBoxSpec], annotations: [AnnotationSpec],
-                            cursor: CursorFrame?, over background: CIImage) -> CIImage {
+                            cursor: CursorFrame?,
+                            clickEffectKind: ClickEffectKind = .pulse,
+                            clickRings: [ClickEffects.Ring] = [],
+                            clickSpokes: [ClickEffects.Spoke] = [],
+                            over background: CIImage) -> CIImage {
         let contentRect = layout.contentRect
         let pad = cardPadding(cursor: cursor, canvasSize: canvasSize)
         let cardRect = contentRect.insetBy(dx: -pad, dy: -pad)
@@ -40,6 +44,11 @@ extension Compositor {
                                     includeSpotlights: false)
         }
         if let cursor {
+            // Same click-effect-then-cursor order as the flat path, so the effects tilt and
+            // magnify with the card and the pointer stays sharp on top of them.
+            card = clickEffectLayer(kind: clickEffectKind, rings: clickRings, spokes: clickSpokes,
+                                    cursorPoint: cursor.point, contentRect: contentRect,
+                                    canvasSize: canvasSize, over: card)
             card = drawCursor(cursor, contentRect: contentRect, canvasSize: canvasSize, over: card)
         }
 

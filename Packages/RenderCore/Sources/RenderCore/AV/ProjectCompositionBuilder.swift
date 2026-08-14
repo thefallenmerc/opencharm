@@ -59,7 +59,12 @@ public enum ProjectCompositionBuilder {
         var zoomSegments = settings.zooms.map { $0.map(\.segment) }
             ?? AutoZoom.segments(clicks: clicks, settings: settings.autoZoom ?? .default)
         var samples = cursorSamples
-        var clickTimes = clicks.map(\.time).sorted()
+        // Single source of truth for both `clickEvents` (time + point, drives ripple/sonar/
+        // sparkle) and `clickTimes` (time only, drives `CursorPulse`): one sorted+remapped pass
+        // over `clicks`, with `clickTimes` derived FROM the remapped array below rather than
+        // computed independently — guarantees the two stay in exact parity through cuts/speed
+        // instead of two copies of the same remap silently drifting apart.
+        var remappedClicks = clicks.sorted { $0.time < $1.time }
         var blurBoxes = settings.blurBoxes ?? []
         var annotations = settings.annotations ?? []
 
@@ -78,7 +83,9 @@ public enum ProjectCompositionBuilder {
                 CursorSample(time: CutClock.map($0.time, cuts: cuts), point: $0.point,
                              cursorType: $0.cursorType)
             }
-            clickTimes = clickTimes.map { CutClock.map($0, cuts: cuts) }
+            remappedClicks = remappedClicks.map {
+                ClickEvent(time: CutClock.map($0.time, cuts: cuts), point: $0.point)
+            }
             blurBoxes = blurBoxes.compactMap { box in
                 var b = box
                 b.start = CutClock.map(box.start, cuts: cuts)
@@ -102,10 +109,11 @@ public enum ProjectCompositionBuilder {
             samples = samples.map {
                 CursorSample(time: $0.time / speed, point: $0.point, cursorType: $0.cursorType)
             }
-            clickTimes = clickTimes.map { $0 / speed }
+            remappedClicks = remappedClicks.map { ClickEvent(time: $0.time / speed, point: $0.point) }
             blurBoxes = blurBoxes.map { $0.scaled(by: 1 / speed) }
             annotations = annotations.map { $0.scaled(by: 1 / speed) }
         }
+        let clickTimes = remappedClicks.map(\.time)
 
         let videoComposition = AVMutableVideoComposition()
         videoComposition.customVideoCompositorClass = CharmVideoCompositor.self
@@ -118,7 +126,8 @@ public enum ProjectCompositionBuilder {
             zoomSegments: zoomSegments,
             cursorSamples: samples, cursorArt: cursorArt,
             cursorSize: settings.cursorSize ?? 0.04,
-            clickTimes: clickTimes, blurBoxes: blurBoxes, annotations: annotations)]
+            clickTimes: clickTimes, clickEvents: remappedClicks,
+            blurBoxes: blurBoxes, annotations: annotations)]
 
         var audioMix: AVAudioMix?
         if !mixParams.isEmpty {

@@ -97,6 +97,11 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     /// optional: `nil`, or an unrecognized raw value from a newer app version, falls back to
     /// classic — the pre-styles look. Only used when the recording hid the system cursor.
     public var cursorStyle: String?
+    /// Selected click-effect animation's raw value (see `ClickEffectKind`). Additive/optional:
+    /// `nil`, or an unrecognized raw value from a newer app version, resolves to `.pulse` —
+    /// today's only click reaction (the pointer's own shrink/spring haptic). Only used when the
+    /// recording hid the system cursor (same gate as `cursorStyle`).
+    public var clickEffect: String?
     /// Output canvas aspect preset. Additive/optional: `nil` = `.auto` (match the recording).
     public var aspect: AspectPreset?
     /// Global playback speed (0.5–2). Preview plays at this rate; export retimes the composition.
@@ -126,6 +131,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
                 autoZoom: AutoZoomSettings? = nil,
                 zooms: [ZoomSpec]? = nil, trimStart: Double? = nil, trimEnd: Double? = nil,
                 cursorSize: Double? = nil, cursorStyle: String? = nil,
+                clickEffect: String? = nil,
                 aspect: AspectPreset? = nil,
                 playbackSpeed: Double? = nil, backgroundBlur: Double? = nil,
                 splits: [Double]? = nil, cuts: [CutRange]? = nil,
@@ -142,6 +148,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         self.trimEnd = trimEnd
         self.cursorSize = cursorSize
         self.cursorStyle = cursorStyle
+        self.clickEffect = clickEffect
         self.aspect = aspect
         self.playbackSpeed = playbackSpeed
         self.backgroundBlur = backgroundBlur

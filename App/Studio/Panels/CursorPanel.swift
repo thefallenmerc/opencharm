@@ -22,6 +22,13 @@ struct CursorPanel: View {
                             }
                         }
                     }
+                    PanelSection(title: "Click effect") {
+                        SegmentChips(options: [
+                            ("None", ClickEffectKind.none), ("Pulse", .pulse),
+                            ("Ripple", .ripple), ("Sonar", .sonar),
+                            ("Sparkle", .sparkle), ("Spotlight", .spotlight),
+                        ], selection: clickEffect)
+                    }
                 } else {
                     PanelSection(title: "Pointer",
                                  subtitle: "This recording keeps the system cursor; new "
@@ -44,6 +51,14 @@ struct CursorPanel: View {
 
     private var selectedStyle: CursorStyle {
         CursorStyle(rawValue: model.renderSettings.cursorStyle ?? "classic") ?? .classic
+    }
+
+    private var clickEffect: Binding<ClickEffectKind> {
+        Binding {
+            ClickEffectKind.resolve(model.renderSettings.clickEffect)
+        } set: {
+            model.renderSettings.clickEffect = $0 == .pulse ? nil : $0.rawValue
+        }
     }
 
     private func styleSwatch(_ style: CursorStyle) -> some View {

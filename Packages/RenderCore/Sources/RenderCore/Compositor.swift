@@ -27,7 +27,10 @@ public final class Compositor {
                        canvasSize: CGSize, zoom: ZoomState = .identity,
                        cursor: CursorFrame? = nil, blurBoxes: [BlurBoxSpec] = [],
                        annotations: [AnnotationSpec] = [],
-                       tilt: TiltState = .identity) -> CIImage {
+                       tilt: TiltState = .identity,
+                       clickEffectKind: ClickEffectKind = .pulse,
+                       clickRings: [ClickEffects.Ring] = [],
+                       clickSpokes: [ClickEffects.Spoke] = []) -> CIImage {
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
         var layout = CanvasLayout.compute(
             canvasSize: canvasSize,
@@ -69,6 +72,12 @@ public final class Compositor {
                 stage = annotationLayers(annotations, contentRect: layout.contentRect, over: stage)
             }
             if let cursor {
+                // Click effects (rings/spokes/spotlight-follow) sit content-anchored, pre-zoom,
+                // immediately under the pointer — same stack position in both render paths.
+                stage = clickEffectLayer(kind: clickEffectKind, rings: clickRings,
+                                         spokes: clickSpokes, cursorPoint: cursor.point,
+                                         contentRect: layout.contentRect, canvasSize: canvasSize,
+                                         over: stage)
                 stage = drawCursor(cursor, contentRect: layout.contentRect,
                                    canvasSize: canvasSize, over: stage)
             }
@@ -78,7 +87,9 @@ public final class Compositor {
             // the background. Everything downstream — zoom, webcam, opacity — is untouched.
             stage = tiltedContentLayer(inputs, settings: settings, layout: layout,
                                        canvasSize: canvasSize, tilt: tilt, blurBoxes: blurBoxes,
-                                       annotations: annotations, cursor: cursor, over: stage)
+                                       annotations: annotations, cursor: cursor,
+                                       clickEffectKind: clickEffectKind, clickRings: clickRings,
+                                       clickSpokes: clickSpokes, over: stage)
         }
         stage = zoomedCanvas(stage, zoom: zoom, contentRect: layout.contentRect,
                              canvasRect: canvasRect)
