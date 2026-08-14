@@ -128,7 +128,7 @@ public final class CharmVideoCompositor: NSObject, AVVideoCompositing {
             RenderInputs(screen: screenImage, webcam: webcamImage,
                          backgroundImage: instruction.backgroundImage),
             settings: instruction.settings, canvasSize: canvasSize, zoom: zoom, cursor: cursor,
-            blurRects: BlurBoxSpec.activeRects(instruction.blurBoxes, at: t))
+            blurBoxes: BlurBoxSpec.active(instruction.blurBoxes, at: t))
         context.render(rendered, to: output)
         request.finish(withComposedVideoFrame: output)
     }

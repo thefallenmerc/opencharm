@@ -214,6 +214,15 @@ final class StylingModel: ObservableObject {
         if selectedBlurID == id { selectedBlurID = nil }
     }
 
+    /// Updates a box's corner radius and/or blur intensity; a `nil` param leaves that property
+    /// unchanged (pass only the ones you're editing).
+    func setBlurStyle(_ id: String, cornerRadius: Double? = nil, intensity: Double? = nil) {
+        guard var spec = blurBoxes.first(where: { $0.id == id }) else { return }
+        if let cornerRadius { spec.cornerRadius = cornerRadius }
+        if let intensity { spec.intensity = intensity }
+        updateBlurBox(spec)
+    }
+
     /// Select (or deselect with nil). Selecting seeks into the box's time range when the
     /// playhead is outside it, so the blur is visible on the preview while editing.
     func selectBlur(_ id: String?) {

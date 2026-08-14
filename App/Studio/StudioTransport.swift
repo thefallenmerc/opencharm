@@ -447,6 +447,14 @@ struct StudioTransport: View {
             Text("drag the box on the preview to reposition, corners to resize")
                 .font(.system(size: 11))
                 .foregroundStyle(StudioTheme.textSecondary)
+            StudioSlider(label: "Corner radius", value: Binding(
+                get: { spec.cornerRadius ?? 0.15 },
+                set: { model.setBlurStyle(spec.id, cornerRadius: $0) }), range: 0...0.5)
+                .frame(width: 130)
+            StudioSlider(label: "Intensity", value: Binding(
+                get: { spec.intensity ?? 0.5 },
+                set: { model.setBlurStyle(spec.id, intensity: $0) }), range: 0...1)
+                .frame(width: 130)
             Spacer()
             Button(role: .destructive) {
                 model.deleteBlurBox(spec.id)
