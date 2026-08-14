@@ -20,10 +20,14 @@ public final class Compositor {
     var maskCache: [String: CIImage] = [:]
     let maskLock = NSLock()
 
+    /// - Parameter tilt: velocity-driven 3D tilt of the content card (see `MotionTilt`).
+    ///   `.identity` — the default, and what every zoom-free or motion-3D-off frame resolves to —
+    ///   takes the original flat code path below, unchanged and pixel-for-pixel.
     public func render(_ inputs: RenderInputs, settings: RenderSettings,
                        canvasSize: CGSize, zoom: ZoomState = .identity,
                        cursor: CursorFrame? = nil, blurBoxes: [BlurBoxSpec] = [],
-                       annotations: [AnnotationSpec] = []) -> CIImage {
+                       annotations: [AnnotationSpec] = [],
+                       tilt: TiltState = .identity) -> CIImage {
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
         var layout = CanvasLayout.compute(
             canvasSize: canvasSize,
@@ -42,28 +46,39 @@ public final class Compositor {
                 .applyingGaussianBlur(sigma: sigma)
                 .cropped(to: canvasRect)
         }
-        if settings.shadow.opacity > 0 {
-            stage = shadow(for: layout.contentRect, radius: layout.cornerRadius,
-                           opacity: settings.shadow.opacity,
-                           blurSigma: layout.shadowBlurSigma,
-                           offsetY: layout.shadowOffsetY)
-                .composited(over: stage)
-        }
-        stage = place(inputs.screen, in: layout.contentRect,
-                      cornerRadius: layout.cornerRadius, over: stage)
-        // Privacy blurs sit on the content, before the cursor (which stays sharp above them)
-        // and before the zoom (so a magnified region keeps its mask glued to the content).
-        if !blurBoxes.isEmpty {
-            stage = privacyBlurLayer(stage, boxes: blurBoxes, contentRect: layout.contentRect)
-        }
-        // Annotations sit on the content too — content-anchored, pre-zoom, above blurs, below
-        // the cursor (which stays sharp above everything).
-        if !annotations.isEmpty {
-            stage = annotationLayers(annotations, contentRect: layout.contentRect, over: stage)
-        }
-        if let cursor {
-            stage = drawCursor(cursor, contentRect: layout.contentRect,
-                               canvasSize: canvasSize, over: stage)
+        if tilt.isIdentity {
+            // Flat path — unchanged since before 3D motion existed, and deliberately kept that
+            // way: every golden and every old project has to come out of it byte for byte.
+            if settings.shadow.opacity > 0 {
+                stage = shadow(for: layout.contentRect, radius: layout.cornerRadius,
+                               opacity: settings.shadow.opacity,
+                               blurSigma: layout.shadowBlurSigma,
+                               offsetY: layout.shadowOffsetY)
+                    .composited(over: stage)
+            }
+            stage = place(inputs.screen, in: layout.contentRect,
+                          cornerRadius: layout.cornerRadius, over: stage)
+            // Privacy blurs sit on the content, before the cursor (which stays sharp above them)
+            // and before the zoom (so a magnified region keeps its mask glued to the content).
+            if !blurBoxes.isEmpty {
+                stage = privacyBlurLayer(stage, boxes: blurBoxes, contentRect: layout.contentRect)
+            }
+            // Annotations sit on the content too — content-anchored, pre-zoom, above blurs, below
+            // the cursor (which stays sharp above everything).
+            if !annotations.isEmpty {
+                stage = annotationLayers(annotations, contentRect: layout.contentRect, over: stage)
+            }
+            if let cursor {
+                stage = drawCursor(cursor, contentRect: layout.contentRect,
+                                   canvasSize: canvasSize, over: stage)
+            }
+        } else {
+            // Tilted path: the same content-anchored stack, but assembled into a free-standing
+            // card that is perspective-warped as one piece (shadow included) before landing on
+            // the background. Everything downstream — zoom, webcam, opacity — is untouched.
+            stage = tiltedContentLayer(inputs, settings: settings, layout: layout,
+                                       canvasSize: canvasSize, tilt: tilt, blurBoxes: blurBoxes,
+                                       annotations: annotations, cursor: cursor, over: stage)
         }
         stage = zoomedCanvas(stage, zoom: zoom, contentRect: layout.contentRect,
                              canvasRect: canvasRect)

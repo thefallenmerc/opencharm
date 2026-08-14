@@ -112,6 +112,10 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     /// Timeline-scoped drawn annotations (text, shapes, arrows, spotlights) over the screen
     /// content. Additive/optional.
     public var annotations: [AnnotationSpec]?
+    /// Velocity-driven perspective tilt of the content card during zooms. Additive/optional:
+    /// `nil` = off, and the compositor's identity fast path then renders byte-for-byte what it
+    /// rendered before the feature existed.
+    public var motion3D: Motion3DSettings?
 
     public init(background: Background, paddingFraction: Double, cornerRadiusFraction: Double,
                 shadow: ShadowSettings, webcam: WebcamSettings,
@@ -120,7 +124,8 @@ public struct RenderSettings: Codable, Equatable, Sendable {
                 cursorSize: Double? = nil, aspect: AspectPreset? = nil,
                 playbackSpeed: Double? = nil, backgroundBlur: Double? = nil,
                 splits: [Double]? = nil, cuts: [CutRange]? = nil,
-                blurBoxes: [BlurBoxSpec]? = nil, annotations: [AnnotationSpec]? = nil) {
+                blurBoxes: [BlurBoxSpec]? = nil, annotations: [AnnotationSpec]? = nil,
+                motion3D: Motion3DSettings? = nil) {
         self.background = background
         self.paddingFraction = paddingFraction
         self.cornerRadiusFraction = cornerRadiusFraction
@@ -138,6 +143,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         self.cuts = cuts
         self.blurBoxes = blurBoxes
         self.annotations = annotations
+        self.motion3D = motion3D
     }
 
     public static let `default` = RenderSettings(

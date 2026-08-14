@@ -60,5 +60,6 @@ final class RenderSettingsTests: XCTestCase {
         let s = try JSONDecoder().decode(RenderSettings.self, from: legacy)
         XCTAssertNil(s.zooms); XCTAssertNil(s.trimStart); XCTAssertNil(s.trimEnd)
         XCTAssertNil(s.autoZoom)
+        XCTAssertNil(s.motion3D) // 3D motion is additive too: absent = off, renders flat
     }
 }

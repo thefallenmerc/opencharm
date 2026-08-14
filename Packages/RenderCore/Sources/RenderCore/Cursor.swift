@@ -1,5 +1,6 @@
 import CoreGraphics
 import CoreImage
+import Foundation
 
 /// A recorded pointer position at a point in time (normalized screen coords, top-left origin).
 /// `cursorType` is the pointer shape at that moment ("arrow", "pointingHand", …) when the
@@ -41,6 +42,63 @@ public enum CursorTrack {
     /// Nearest-preceding pointer position at time `t`.
     public static func point(at t: Double, samples: [CursorSample]) -> CGPoint? {
         sample(at: t, samples: samples)?.point
+    }
+
+    /// Smoothed pointer velocity at `t`, in normalized content units per second (top-left origin,
+    /// so `dy > 0` means the pointer is moving DOWN the screen).
+    ///
+    /// Deterministic closed-form replay: the filter starts at rest `horizon` seconds before `t`
+    /// and folds each recorded sample pair's finite difference through a one-pole low-pass with
+    /// time constant `tau`. It keeps NO state between calls — frames render out of order on
+    /// AVFoundation's concurrent queue, so the same `t` must always yield the same vector
+    /// regardless of what was queried before. Same stateless-replay pattern as
+    /// `ZoomTimeline.followedFocus`; cost is O(samples in the window).
+    ///
+    /// Returns `.zero` when the window `[t - horizon, t]` holds fewer than two samples — i.e. the
+    /// pointer has demonstrably been at rest for longer than the horizon.
+    public static func velocity(at t: Double, samples: [CursorSample],
+                                tau: Double = 0.25, horizon: Double = 2.0) -> CGVector {
+        guard samples.count > 1, tau > 0 else { return .zero }
+        let start = lowerBound(samples, time: t - horizon)
+        guard start < samples.count, samples[start].time <= t else { return .zero }
+
+        var vx = 0.0, vy = 0.0
+        var last = samples[start].time
+        var i = start
+        while i + 1 < samples.count, samples[i + 1].time <= t {
+            let (a, b) = (samples[i], samples[i + 1])
+            let dt = b.time - a.time
+            i += 1
+            guard dt > 0 else { continue } // duplicate timestamps carry no motion
+            last = b.time
+            // Instantaneous finite difference, with the interval floored at one 240 Hz tick so a
+            // pair of near-simultaneous samples cannot explode into a spike.
+            let step = max(dt, 1.0 / 240)
+            let rawX = Double(b.point.x - a.point.x) / step
+            let rawY = Double(b.point.y - a.point.y) / step
+            let alpha = 1 - exp(-dt / tau)
+            vx += (rawX - vx) * alpha
+            vy += (rawY - vy) * alpha
+        }
+        // Past the last sample the pointer is, by definition, not moving: coast to rest with the
+        // same time constant instead of holding the last velocity forever.
+        if t > last {
+            let decay = exp(-(t - last) / tau)
+            vx *= decay
+            vy *= decay
+        }
+        return CGVector(dx: vx, dy: vy)
+    }
+
+    /// Index of the first sample at or after `time` (`samples.count` if there is none).
+    /// Mirrors the binary search in `sample(at:)`, as a lower bound rather than an upper one.
+    private static func lowerBound(_ samples: [CursorSample], time: Double) -> Int {
+        var lo = 0, hi = samples.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if samples[mid].time < time { lo = mid + 1 } else { hi = mid }
+        }
+        return lo
     }
 }
 

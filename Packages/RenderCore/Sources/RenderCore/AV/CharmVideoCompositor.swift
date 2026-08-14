@@ -116,6 +116,13 @@ public final class CharmVideoCompositor: NSObject, AVVideoCompositing {
         let t = request.compositionTime.seconds
         let zoom = ZoomTimeline.state(at: t, segments: instruction.zoomSegments,
                                       cursorTrack: instruction.cursorSamples)
+        // 3D motion: the content card leans with the pointer's velocity, gated on the zoom
+        // envelope so it fades in and out with the magnification and is exactly identity (the
+        // compositor's byte-identical flat path) whenever no zoom is engaged. `cursorSamples`
+        // are already cut- and speed-remapped by the builder, so the tilt retimes for free.
+        let tilt = MotionTilt.state(at: t, samples: instruction.cursorSamples,
+                                    zoomProgress: zoom.progress,
+                                    settings: instruction.settings.motion3D)
         var cursor: CursorFrame?
         if let img = instruction.cursorImage,
            let sample = CursorTrack.sample(at: t, samples: instruction.cursorSamples) {
@@ -132,7 +139,8 @@ public final class CharmVideoCompositor: NSObject, AVVideoCompositing {
                          backgroundImage: instruction.backgroundImage),
             settings: instruction.settings, canvasSize: canvasSize, zoom: zoom, cursor: cursor,
             blurBoxes: BlurBoxSpec.active(instruction.blurBoxes, at: t),
-            annotations: AnnotationSpec.active(instruction.annotations, at: t))
+            annotations: AnnotationSpec.active(instruction.annotations, at: t),
+            tilt: tilt)
         context.render(rendered, to: output)
         request.finish(withComposedVideoFrame: output)
     }

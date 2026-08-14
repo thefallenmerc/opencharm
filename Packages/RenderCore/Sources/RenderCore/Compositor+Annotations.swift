@@ -18,7 +18,14 @@ extension Compositor {
     /// Composites every active annotation over `stage`, in array order (later = on top).
     /// Non-spotlight kinds draw their own sprite immediately; spotlights are collected and
     /// applied last as a single dim layer with every active hole punched into it together.
-    func annotationLayers(_ specs: [AnnotationSpec], contentRect: CGRect, over stage: CIImage) -> CIImage {
+    ///
+    /// `includeSpotlights: false` draws only the sprite kinds and leaves the dim layer to a
+    /// separate `spotlightAnnotationLayers` call. The 3D-tilt path needs that split: sprites are
+    /// content-anchored and ride the warped card, while the spotlight's dim covers the whole
+    /// canvas (background included) and so has to stay on the flat stage. The default keeps the
+    /// original single-pass behaviour for every existing caller.
+    func annotationLayers(_ specs: [AnnotationSpec], contentRect: CGRect, over stage: CIImage,
+                          includeSpotlights: Bool = true) -> CIImage {
         var out = stage
         var spotlights: [AnnotationSpec] = []
         for spec in specs {
@@ -36,10 +43,19 @@ extension Compositor {
                 out = arrowLayer(spec, contentRect: contentRect, over: out)
             }
         }
-        if !spotlights.isEmpty {
+        if includeSpotlights, !spotlights.isEmpty {
             out = spotlightLayer(spotlights, contentRect: contentRect, over: out)
         }
         return out
+    }
+
+    /// The spotlight half of `annotationLayers`, on its own — the other side of the split above.
+    /// Picks the active spotlights out of `specs` and applies them as one dim layer.
+    func spotlightAnnotationLayers(_ specs: [AnnotationSpec], contentRect: CGRect,
+                                   over stage: CIImage) -> CIImage {
+        let spotlights = specs.filter { $0.resolvedKind == .spotlight }
+        guard !spotlights.isEmpty else { return stage }
+        return spotlightLayer(spotlights, contentRect: contentRect, over: stage)
     }
 
     // MARK: geometry mapping (same normalized content space as `privacyBlurLayer`)
