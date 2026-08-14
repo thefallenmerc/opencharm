@@ -16,12 +16,14 @@ public final class Compositor {
 
     // Squircle masks are rasterized once per (size, exponent) and reused across frames.
     // `render` can be called from AVFoundation's concurrent request queue → lock the cache.
-    private var maskCache: [String: CIImage] = [:]
-    private let maskLock = NSLock()
+    // Internal (not private) so Compositor+Annotations.swift's sprite rasterizers share it.
+    var maskCache: [String: CIImage] = [:]
+    let maskLock = NSLock()
 
     public func render(_ inputs: RenderInputs, settings: RenderSettings,
                        canvasSize: CGSize, zoom: ZoomState = .identity,
-                       cursor: CursorFrame? = nil, blurBoxes: [BlurBoxSpec] = []) -> CIImage {
+                       cursor: CursorFrame? = nil, blurBoxes: [BlurBoxSpec] = [],
+                       annotations: [AnnotationSpec] = []) -> CIImage {
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
         var layout = CanvasLayout.compute(
             canvasSize: canvasSize,
@@ -53,6 +55,11 @@ public final class Compositor {
         // and before the zoom (so a magnified region keeps its mask glued to the content).
         if !blurBoxes.isEmpty {
             stage = privacyBlurLayer(stage, boxes: blurBoxes, contentRect: layout.contentRect)
+        }
+        // Annotations sit on the content too — content-anchored, pre-zoom, above blurs, below
+        // the cursor (which stays sharp above everything).
+        if !annotations.isEmpty {
+            stage = annotationLayers(annotations, contentRect: layout.contentRect, over: stage)
         }
         if let cursor {
             stage = drawCursor(cursor, contentRect: layout.contentRect,

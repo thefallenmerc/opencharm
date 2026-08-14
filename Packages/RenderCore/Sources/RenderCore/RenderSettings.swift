@@ -109,6 +109,9 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     public var cuts: [CutRange]?
     /// Timeline-scoped privacy blur regions over the screen content. Additive/optional.
     public var blurBoxes: [BlurBoxSpec]?
+    /// Timeline-scoped drawn annotations (text, shapes, arrows, spotlights) over the screen
+    /// content. Additive/optional.
+    public var annotations: [AnnotationSpec]?
 
     public init(background: Background, paddingFraction: Double, cornerRadiusFraction: Double,
                 shadow: ShadowSettings, webcam: WebcamSettings,
@@ -117,7 +120,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
                 cursorSize: Double? = nil, aspect: AspectPreset? = nil,
                 playbackSpeed: Double? = nil, backgroundBlur: Double? = nil,
                 splits: [Double]? = nil, cuts: [CutRange]? = nil,
-                blurBoxes: [BlurBoxSpec]? = nil) {
+                blurBoxes: [BlurBoxSpec]? = nil, annotations: [AnnotationSpec]? = nil) {
         self.background = background
         self.paddingFraction = paddingFraction
         self.cornerRadiusFraction = cornerRadiusFraction
@@ -134,6 +137,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         self.splits = splits
         self.cuts = cuts
         self.blurBoxes = blurBoxes
+        self.annotations = annotations
     }
 
     public static let `default` = RenderSettings(
