@@ -18,9 +18,17 @@ extension Compositor {
     /// no-op (returns `stage` unchanged) whenever `rings`/`spokes` are empty and `kind !=
     /// .spotlight`, which is exactly the state every existing caller (and `nil`/"pulse") is in —
     /// the identity contract holds because this function does nothing in that case.
+    ///
+    /// `includeSpotlightFollow: false` draws only the sprite effects (rings, spokes) and leaves
+    /// the follow-dim to a separate `spotlightFollowClickLayer` call — the same split
+    /// `annotationLayers`/`spotlightAnnotationLayers` makes, needed for the same reason: sprites
+    /// are content-anchored and belong on the 3D-tilt card, while the dim covers the whole canvas
+    /// (background included) and so has to stay on the flat stage. The default keeps the original
+    /// single-pass behaviour for the flat path.
     func clickEffectLayer(kind: ClickEffectKind, rings: [ClickEffects.Ring],
                           spokes: [ClickEffects.Spoke], cursorPoint: CGPoint?,
                           contentRect: CGRect, canvasSize: CGSize,
+                          includeSpotlightFollow: Bool = true,
                           over stage: CIImage) -> CIImage {
         var out = stage
         if !rings.isEmpty {
@@ -29,11 +37,23 @@ extension Compositor {
         if !spokes.isEmpty {
             out = spokeLayer(spokes, contentRect: contentRect, canvasSize: canvasSize, over: out)
         }
-        if kind == .spotlight, let cursorPoint {
-            out = spotlightFollowLayer(cursorPoint, contentRect: contentRect,
-                                       canvasSize: canvasSize, over: out)
+        if includeSpotlightFollow {
+            out = spotlightFollowClickLayer(kind: kind, cursorPoint: cursorPoint,
+                                            contentRect: contentRect, canvasSize: canvasSize,
+                                            over: out)
         }
         return out
+    }
+
+    /// The follow-dim half of `clickEffectLayer`, on its own — the other side of the split above.
+    /// A no-op for every kind but `.spotlight`, and (like every click effect) whenever there is no
+    /// synthetic cursor to follow.
+    func spotlightFollowClickLayer(kind: ClickEffectKind, cursorPoint: CGPoint?,
+                                   contentRect: CGRect, canvasSize: CGSize,
+                                   over stage: CIImage) -> CIImage {
+        guard kind == .spotlight, let cursorPoint else { return stage }
+        return spotlightFollowLayer(cursorPoint, contentRect: contentRect,
+                                    canvasSize: canvasSize, over: stage)
     }
 
     /// Same normalized content-space → canvas-pixel mapping `drawCursor`/`Compositor+Annotations`

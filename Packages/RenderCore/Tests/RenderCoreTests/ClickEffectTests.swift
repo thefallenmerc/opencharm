@@ -178,6 +178,153 @@ final class ClickEffectTests: XCTestCase {
                       0, accuracy: 0.0001)
     }
 
+    // MARK: - 5b. Tilt path: the spotlight dim belongs to the flat stage, not the warped card.
+
+    private func tiltCursorArt() -> CIImage {
+        CIImage(color: CIColor(red: 1, green: 1, blue: 0))
+            .cropped(to: CGRect(x: 0, y: 0, width: 20, height: 20))
+    }
+
+    /// `image` with every RGB channel scaled by `factor` — what a full-canvas dim of
+    /// `1 - factor` alpha black does to an already-opaque frame.
+    private func scaledRGB(_ image: CIImage, _ factor: Double) -> CIImage {
+        image.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: factor, y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: 0, y: factor, z: 0, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: factor, w: 0),
+        ])
+    }
+
+    private func meanRGB(_ image: CIImage, _ rect: CGRect) -> (r: Double, g: Double, b: Double) {
+        let cg = GoldenAssert.cgImage(image.cropped(to: rect))
+        var data = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+        let ctx = CGContext(data: &data, width: cg.width, height: cg.height,
+                            bitsPerComponent: 8, bytesPerRow: cg.width * 4,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        var sum = (0.0, 0.0, 0.0)
+        for i in stride(from: 0, to: data.count, by: 4) {
+            sum.0 += Double(data[i]); sum.1 += Double(data[i + 1]); sum.2 += Double(data[i + 2])
+        }
+        let n = Double(cg.width * cg.height) * 255
+        return (sum.0 / n, sum.1 / n, sum.2 / n)
+    }
+
+    /// Task 4 kept annotation spotlights off the tilt card because their dim covers the WHOLE
+    /// canvas; the spotlight-follow dim has to live in the same place for the same reason. Dimming
+    /// the mid-assembly card instead tinted the card's transparent gutter (a dark fringe on the
+    /// warp, and a rectangular silhouette for the card's own drop shadow) and left the background
+    /// undimmed, so the dim popped on and off as the tilt engaged.
+    ///
+    /// The contract asserted here is exactly what "a full-canvas dim" means: outside the hole, the
+    /// spotlight frame is the undimmed frame times `1 - dimOpacity`, everywhere — background,
+    /// gutter, card shadow and card interior alike — on the tilt path just as on the flat one.
+    func testTiltPathSpotlightDimsTheWholeCanvasWithNoFringeOnTheCard() {
+        let c = Compositor()
+        let canvas = CGSize(width: 400, height: 260)
+        var s = RenderSettings.default
+        s.webcam.visible = false
+        s.background = .solid(RGBAColor(r: 1, g: 1, b: 1))
+        // Shadow deliberately left at its default 0.45: the card's silhouette shadow is derived
+        // from the warped card's own alpha, so a dim baked into the gutter corrupts it too.
+        XCTAssertGreaterThan(s.shadow.opacity, 0)
+        let screen = CIImage(color: CIColor(red: 0, green: 0, blue: 1))
+            .cropped(to: CGRect(x: 0, y: 0, width: 320, height: 200))
+        // Pointer parked bottom-right, so the spotlight hole is nowhere near the probe.
+        let cursor = CursorFrame(image: tiltCursorArt(), point: CGPoint(x: 0.85, y: 0.85),
+                                 sizeFraction: 0.02)
+        let tilt = TiltState(yaw: 0.12, pitch: -0.08)
+
+        func frame(_ kind: ClickEffectKind, _ tilt: TiltState) -> CIImage {
+            c.render(RenderInputs(screen: screen), settings: s, canvasSize: canvas,
+                     cursor: cursor, tilt: tilt, clickEffectKind: kind)
+        }
+        let lit = frame(.pulse, tilt)      // no dim at all
+        let dimmed = frame(.spotlight, tilt)
+        XCTAssertEqual(dimmed.extent, CGRect(origin: .zero, size: canvas),
+                       "the tilt path must keep the canvas contract with the dim on")
+
+        // A band up the canvas's left side (CI space is y-up): it crosses the background corner,
+        // the card's transparent gutter, its drop shadow and its interior — every surface the old
+        // code dimmed inconsistently — and is far from the bottom-right hole.
+        let probe = CGRect(x: 0, y: 130, width: 60, height: 130)
+        let expected = scaledRGB(lit, 0.55) // 1 - spotlightDimOpacity
+        XCTAssertLessThan(
+            GoldenAssert.meanAbsDiff(GoldenAssert.cgImage(dimmed.cropped(to: probe)),
+                                     GoldenAssert.cgImage(expected.cropped(to: probe))), 0.002,
+            "outside the hole the tilted spotlight frame must be a uniform dim of the lit frame")
+
+        // Spelled out at the one probe the old code got most obviously wrong: the canvas corner is
+        // pure background, nowhere near the card, and it must be dimmed.
+        let corner = CGRect(x: 2, y: 246, width: 12, height: 12)
+        let litCorner = meanRGB(lit, corner)
+        XCTAssertGreaterThan(litCorner.r, 0.95, "the corner is the white background")
+        let dimCorner = meanRGB(dimmed, corner)
+        XCTAssertEqual(dimCorner.r, litCorner.r * 0.55, accuracy: 0.02,
+                       "background outside the card must dim too, not just the card")
+
+        // …and the flat path, whose behaviour must not have moved, satisfies the same contract.
+        let flatLit = frame(.pulse, .identity)
+        let flatDim = frame(.spotlight, .identity)
+        XCTAssertLessThan(
+            GoldenAssert.meanAbsDiff(GoldenAssert.cgImage(flatDim.cropped(to: probe)),
+                                     GoldenAssert.cgImage(scaledRGB(flatLit, 0.55)
+                                        .cropped(to: probe))), 0.002,
+            "flat-path expectation, unchanged")
+    }
+
+    // MARK: - 5c. Tilt path: the card's gutter has to fit a click ring at the content edge.
+
+    /// The tilt card is cropped to `contentRect` + a gutter before the perspective warp, so
+    /// anything past the gutter gets a straight clipped edge. The gutter used to be sized for the
+    /// synthetic pointer alone (2.5 × its height ≈ 33 px here) while a ring reaches 0.09 × canvas
+    /// height (≈ 58 px) past a click point that can sit exactly ON the content edge.
+    func testTiltCardGutterFitsAClickRingAtTheContentEdge() {
+        let c = Compositor()
+        let canvas = CGSize(width: 1000, height: 650)
+        var s = RenderSettings.default
+        s.webcam.visible = false
+        s.shadow.opacity = 0
+        s.background = .solid(RGBAColor(r: 0, g: 0, b: 0))
+        // A square screen leaves room on the canvas either side of the content for the ring.
+        let screen = CIImage(color: CIColor(red: 0.12, green: 0.12, blue: 0.12))
+            .cropped(to: CGRect(x: 0, y: 0, width: 200, height: 200))
+        let layout = CanvasLayout.compute(canvasSize: canvas, screenAspect: 1, settings: s)
+        // Pointer small (the case that makes the old gutter too tight) and parked top-left.
+        let cursor = CursorFrame(image: tiltCursorArt(), point: CGPoint(x: 0.05, y: 0.05),
+                                 sizeFraction: 0.02)
+        // A ring on the content's right edge, grown to just inside the reach the gutter now
+        // guarantees. Built directly: `ClickEffects.rings` timing is covered above; what is under
+        // test here is the renderer's clipping, at a radius the geometry really does produce.
+        let radius = ClickEffects.maxReachRatio - 0.005
+        let ring = ClickEffects.Ring(point: CGPoint(x: 1, y: 0.5), radius: radius, alpha: 0.9,
+                                     lineWidth: 0.006)
+        // A real tilt, but a shallow one: the ring must survive the crop, and staying near-flat
+        // keeps the probe over the ring's stroke rather than chasing the warp.
+        let tilt = TiltState(yaw: 0.01, pitch: 0)
+
+        func frame(_ rings: [ClickEffects.Ring], _ tilt: TiltState) -> CGImage {
+            GoldenAssert.cgImage(c.render(RenderInputs(screen: screen), settings: s,
+                                          canvasSize: canvas, cursor: cursor, tilt: tilt,
+                                          clickEffectKind: .ripple, clickRings: rings))
+        }
+        // An 8×6 window straddling the ring's outer stroke, ~50 px past the content edge — beyond
+        // the pointer-sized gutter, inside the click-sized one.
+        let reach = CGFloat(radius) * canvas.height
+        let probe = CGRect(x: layout.contentRect.maxX + reach - 6,
+                           y: canvas.height - layout.contentRect.midY - 3,
+                           width: 8, height: 6).integral
+        func diff(_ tilt: TiltState) -> Double {
+            GoldenAssert.meanAbsDiff(frame([ring], tilt).cropping(to: probe)!,
+                                     frame([], tilt).cropping(to: probe)!)
+        }
+        XCTAssertGreaterThan(diff(.identity), 0.01,
+                             "sanity: the flat path draws the ring's outer stroke at the probe")
+        XCTAssertGreaterThan(diff(tilt), 0.01,
+                             "the tilt card's gutter must not clip the ring's far side")
+    }
+
     // MARK: - 6. clickEvents remap parity with clickTimes through cuts + speed.
 
     func testClickEventsRemapMatchesClickTimesExactlyThroughCutsAndSpeed() async throws {

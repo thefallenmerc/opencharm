@@ -195,12 +195,23 @@ public enum ZoomTimeline {
     /// motion read as a camera operator, not a jitterbug (Screen Charm ships ~this feel).
     static let panTau = 0.35
 
+    /// Which segment covers `t`, or `nil` when the timeline is between zooms. Segments are
+    /// non-overlapping, so the first match is THE match.
+    ///
+    /// Split out of `state` because the *identity* of the active segment is information `state`
+    /// throws away, and one caller genuinely needs it: `CameraVelocity.sampled` has to tell a real
+    /// pan apart from the focus discontinuity that exists at every segment edge (see its comment).
+    static func activeSegmentIndex(at t: Double, segments: [ZoomSegment]) -> Int? {
+        segments.firstIndex { t >= $0.start && t < $0.end }
+    }
+
     /// The zoom to apply at composition time `t`. Segments are non-overlapping and time-ordered.
     /// With a `cursorTrack`, the zoomed viewport softly follows the live cursor (low-pass
     /// filtered) once the zoom-in settles; without one it pans between the segment's focus keys.
     public static func state(at t: Double, segments: [ZoomSegment],
                              cursorTrack: [CursorSample] = []) -> ZoomState {
-        guard let s = segments.first(where: { t >= $0.start && t < $0.end }) else { return .identity }
+        guard let i = activeSegmentIndex(at: t, segments: segments) else { return .identity }
+        let s = segments[i]
         let f = envelope(t, s)
         let focus = cursorTrack.isEmpty
             ? focus(at: t, keys: s.focusKeys)

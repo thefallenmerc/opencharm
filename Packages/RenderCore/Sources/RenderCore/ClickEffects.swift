@@ -135,6 +135,23 @@ public enum ClickEffects {
         return out
     }
 
+    /// Whether `kind` draws content-anchored SPRITES (rings or sparkle spokes) around a click
+    /// point. `none`/`pulse` draw nothing at all, and `spotlight`'s only mark is a full-canvas dim
+    /// that is not anchored to the content. `Compositor+Motion3D.cardPadding` asks so it can size
+    /// the tilt card's gutter for a ring sitting on the content edge.
+    public static func drawsSprites(_ kind: ClickEffectKind) -> Bool {
+        switch kind {
+        case .ripple, .sonar, .sparkle: return true
+        case .none, .pulse, .spotlight: return false
+        }
+    }
+
+    /// The furthest a click SPRITE reaches from its click point, as a fraction of canvas height:
+    /// the ring's fully-grown radius (a sparkle burst stops at `extentEnd`, 0.05, well inside it).
+    /// The drawn ring's outer stroke edge lands exactly on this radius — see `ringUnitSprite`,
+    /// whose ellipse is inset by half its stroke width for precisely that reason.
+    public static let maxReachRatio = radiusEnd
+
     /// `pulse` gating: the click-shrink haptic (`CursorPulse.scale`) plays for every kind except
     /// `.none`, including the new ring/spoke/spotlight effects (they compose with the pulse, not
     /// replace it) — only `.none` turns it off (scale pinned to 1).

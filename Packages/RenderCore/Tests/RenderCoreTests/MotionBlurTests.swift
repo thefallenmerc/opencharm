@@ -202,4 +202,124 @@ final class MotionBlurTests: XCTestCase {
                             canvasSize: canvas, zoom: zoom)
         XCTAssertGreaterThan(GoldenAssert.meanAbsDiff(cg(blurred), cg(flat)), 0.005)
     }
+
+    // MARK: zoom-segment boundaries
+
+    /// An OFF-CENTRE zoom — the case the end-to-end test above (focus 0.5, 0.5) cannot see.
+    private let offCentre = [ZoomSegment(start: 1, end: 4, easeIn: 0.6, easeOut: 0.6,
+                                         focus: CGPoint(x: 0.2, y: 0.25), scale: 2.0)]
+
+    private func panOnly(_ v: CameraVelocity) -> CameraVelocity {
+        CameraVelocity(focusRate: v.focusRate, scaleRate: 0)
+    }
+
+    /// `ZoomTimeline.state`'s focus is discontinuous at a segment edge (canvas centre outside, the
+    /// segment's anchor one instant inside) while its scale is not. A raw finite difference
+    /// straddling that edge therefore reports a pan of tens of units per second and pegs the
+    /// directional blur at its 24 px radius cap — a full-frame smear on exactly one frame, at the
+    /// start AND the end of every zoom. `CameraVelocity.sampled` drops the pan component there.
+    func testFocusJumpAtASegmentEdgeIsNotReportedAsAPan() {
+        let eps = CameraVelocity.sampleEps
+        for t in [1.0, 4.0] { // the segment's start and its end
+            let raw = CameraVelocity.between(ZoomTimeline.state(at: t - eps, segments: offCentre),
+                                             ZoomTimeline.state(at: t + eps, segments: offCentre),
+                                             dt: 2 * eps)
+            XCTAssertGreaterThan(hypot(raw.focusRate.dx, raw.focusRate.dy), 10,
+                                 "the hazard this fix exists for: a teleporting focus at t = \(t)")
+
+            let v = CameraVelocity.sampled(at: t, segments: offCentre)
+            XCTAssertEqual(v.focusRate.dx, 0, "no pan may be reported across the edge at t = \(t)")
+            XCTAssertEqual(v.focusRate.dy, 0)
+            XCTAssertEqual(v.scaleRate, raw.scaleRate, accuracy: 1e-12,
+                           "scale is continuous across the edge — its rate must survive")
+        }
+    }
+
+    /// The same boundary, in pixels: the frame at a zoom's first instant must render exactly like
+    /// the no-blur frame, and the raw (unguarded) difference must be shown to smear it — otherwise
+    /// this test would pass on a renderer that simply never blurs.
+    func testSegmentEdgeFrameRendersWithoutASmearWithOffCentreFocus() {
+        let c = Compositor()
+        let t = 1.0
+        let zoom = ZoomTimeline.state(at: t, segments: offCentre)
+        func frame(_ v: CameraVelocity) -> CGImage {
+            cg(c.render(RenderInputs(screen: screen()), settings: settings(motionBlur: 1),
+                        canvasSize: canvas, zoom: zoom, cameraVelocity: v))
+        }
+        let baseline = cg(c.render(RenderInputs(screen: screen()),
+                                   settings: settings(motionBlur: nil),
+                                   canvasSize: canvas, zoom: zoom))
+
+        let raw = CameraVelocity.between(
+            ZoomTimeline.state(at: t - CameraVelocity.sampleEps, segments: offCentre),
+            ZoomTimeline.state(at: t + CameraVelocity.sampleEps, segments: offCentre),
+            dt: 2 * CameraVelocity.sampleEps)
+        XCTAssertGreaterThan(GoldenAssert.meanAbsDiff(frame(panOnly(raw)), baseline), 0.01,
+                             "the unguarded pan rate smears the whole frame at the radius cap")
+
+        let sampled = CameraVelocity.sampled(at: t, segments: offCentre)
+        XCTAssertEqual(GoldenAssert.meanAbsDiff(frame(panOnly(sampled)), baseline), 0,
+                       accuracy: 1e-12, "the guarded pan component must not touch a pixel")
+        // And the whole velocity, not just its pan half: at the edge the scale rate is still
+        // inside its own gate, so the boundary frame comes out untouched end to end.
+        XCTAssertEqual(GoldenAssert.meanAbsDiff(frame(sampled), baseline), 0, accuracy: 1e-12)
+    }
+
+    /// Two segments that touch (`AutoZoom` trims overlaps to exactly this) hit the same trap with
+    /// two different anchors — and the envelope is non-zero on BOTH sides of the shared edge, so a
+    /// "is either sample outside a zoom" test would sail straight past it. The guard is
+    /// same-segment identity, which catches it.
+    func testTouchingSegmentsDropThePanAtTheirSharedEdge() {
+        let segments = [ZoomSegment(start: 0, end: 2, easeIn: 0.6, easeOut: 0.6,
+                                    focus: CGPoint(x: 0.2, y: 0.2), scale: 2),
+                        ZoomSegment(start: 2, end: 4, easeIn: 0.6, easeOut: 0.6,
+                                    focus: CGPoint(x: 0.8, y: 0.8), scale: 2)]
+        let eps = CameraVelocity.sampleEps
+        let prev = ZoomTimeline.state(at: 2 - eps, segments: segments)
+        let next = ZoomTimeline.state(at: 2 + eps, segments: segments)
+        XCTAssertGreaterThan(prev.progress, 0, "still inside the outgoing zoom")
+        XCTAssertGreaterThan(next.progress, 0, "already inside the incoming one")
+        XCTAssertGreaterThan(hypot(CameraVelocity.between(prev, next, dt: 2 * eps).focusRate.dx,
+                                   CameraVelocity.between(prev, next, dt: 2 * eps).focusRate.dy),
+                             10, "the anchors are far apart — a raw difference sees a huge pan")
+
+        let v = CameraVelocity.sampled(at: 2, segments: segments)
+        XCTAssertEqual(v.focusRate.dx, 0)
+        XCTAssertEqual(v.focusRate.dy, 0)
+    }
+
+    /// The guard must not swallow real motion: a genuine pan between two focus keys, both probes
+    /// inside the same segment, has to come through exactly as the raw difference computes it —
+    /// and still smear the frame.
+    func testSampledKeepsARealPanInsideOneSegment() {
+        let segments = [ZoomSegment(start: 0, end: 6, easeIn: 0.6, easeOut: 0.6, scale: 2,
+                                    focusKeys: [FocusKey(time: 1, point: CGPoint(x: 0.2, y: 0.25)),
+                                                FocusKey(time: 2, point: CGPoint(x: 0.8, y: 0.75))])]
+        let t = 2.1
+        let eps = CameraVelocity.sampleEps
+        let raw = CameraVelocity.between(ZoomTimeline.state(at: t - eps, segments: segments),
+                                         ZoomTimeline.state(at: t + eps, segments: segments),
+                                         dt: 2 * eps)
+        let v = CameraVelocity.sampled(at: t, segments: segments)
+        XCTAssertEqual(v.focusRate.dx, raw.focusRate.dx, accuracy: 1e-12)
+        XCTAssertEqual(v.focusRate.dy, raw.focusRate.dy, accuracy: 1e-12)
+        XCTAssertGreaterThan(hypot(v.focusRate.dx, v.focusRate.dy), 0.1, "the camera IS panning")
+
+        let c = Compositor()
+        let zoom = ZoomTimeline.state(at: t, segments: segments)
+        let blurred = c.render(RenderInputs(screen: screen()), settings: settings(motionBlur: 1),
+                               canvasSize: canvas, zoom: zoom, cameraVelocity: panOnly(v))
+        let flat = c.render(RenderInputs(screen: screen()), settings: settings(motionBlur: nil),
+                            canvasSize: canvas, zoom: zoom)
+        XCTAssertGreaterThan(GoldenAssert.meanAbsDiff(cg(blurred), cg(flat)), 0.005,
+                             "a real mid-segment pan must still blur")
+    }
+
+    /// Nothing anywhere near a zoom: both probes are outside every segment, the focus is the
+    /// canvas centre at both, and the velocity is exactly zero — no accidental blur on a
+    /// completely static stretch of timeline.
+    func testSampledIsZeroBetweenZooms() {
+        XCTAssertEqual(CameraVelocity.sampled(at: 8, segments: offCentre), .zero)
+        XCTAssertEqual(CameraVelocity.sampled(at: 0.2, segments: offCentre), .zero)
+    }
 }
