@@ -471,6 +471,12 @@ struct AnnotationOverlay: View {
 /// coordinates, through the preview's current zoom (a uniform scale about a focus point —
 /// applying it in view space is equivalent to the compositor's canvas-space transform). Shared
 /// by blur boxes and annotations — same content card, same zoom.
+///
+/// Known limitation (v1, deliberate): this mapper replicates the zoom transform but NOT the 3D
+/// tilt perspective (`Motion3DSettings` / `MotionTilt`). While a zoom is tilting during playback
+/// with cursor motion, editing chrome (box outlines, handles, annotation hit targets) may sit
+/// slightly offset from the warped content underneath. Editing at rest (playback paused, or the
+/// tilt gated off) is unaffected, since the tilt only ever engages during an active zoom.
 private struct ContentMapper {
     let contentView: CGRect
     let focus: CGPoint

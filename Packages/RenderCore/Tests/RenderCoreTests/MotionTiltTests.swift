@@ -281,6 +281,32 @@ final class MotionTiltTests: XCTestCase {
             "sub-threshold tilt must also take the flat path")
     }
 
+    /// Closes the enabled-flag path end to end (not just at the `MotionTilt.state` level, which
+    /// `testStateIsIdentityWhenTheFeatureIsOff` already covers): settings that are PRESENT but
+    /// disabled must render pixel-identically to `motion3D == nil`, going through the same
+    /// state → render pipeline `CharmVideoCompositor` uses, not a hand-supplied `.identity` tilt.
+    func testDisabledMotion3DSettingsRenderIdenticallyToNilSettings() {
+        let c = Compositor()
+        let s = loadedSettings()
+        let track = rightwardTrack(speed: 1.0, seconds: 1)
+        let zoom = ZoomState(scale: 1.6, focus: CGPoint(x: 0.4, y: 0.45), progress: 1)
+        let cf = CursorFrame(image: cursorImage(), point: CGPoint(x: 0.45, y: 0.55),
+                             sizeFraction: 0.08)
+
+        func frame(motion3D: Motion3DSettings?) -> CGImage {
+            let tilt = MotionTilt.state(at: 1, samples: track, zoomProgress: zoom.progress,
+                                        settings: motion3D)
+            let img = c.render(RenderInputs(screen: screen()), settings: s, canvasSize: canvas,
+                               zoom: zoom, cursor: cf, blurBoxes: boxes, annotations: annotations,
+                               tilt: tilt)
+            return GoldenAssert.cgImage(img)
+        }
+        let nilFrame = frame(motion3D: nil)
+        let disabledFrame = frame(motion3D: Motion3DSettings(enabled: false, strength: 1))
+        XCTAssertLessThan(GoldenAssert.meanAbsDiff(nilFrame, disabledFrame), 0.001,
+                          "enabled: false, strength: 1 must render identically to motion3D == nil")
+    }
+
     // MARK: render — tilt path
 
     /// Mean sRGB of a region of the rendered frame (CGImage coords: row 0 is the TOP).

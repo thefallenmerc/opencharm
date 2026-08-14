@@ -35,6 +35,17 @@ struct GeneralPanel: View {
                         .font(.system(size: 12))
                         .foregroundStyle(StudioTheme.textSecondary)
                 }
+                PanelSection(title: "3D Motion",
+                             subtitle: "Tilts the screen toward mouse movement during zooms") {
+                    Toggle("Tilt with motion", isOn: motion3DEnabled)
+                        .toggleStyle(.switch)
+                        .tint(StudioTheme.accent)
+                        .font(.system(size: 12))
+                        .foregroundStyle(StudioTheme.textSecondary)
+                    if motion3DEnabled.wrappedValue {
+                        StudioSlider(label: "Strength", value: motion3DStrength, range: 0...1)
+                    }
+                }
                 PanelSection(title: "Canvas") {
                     StudioSlider(label: "Padding",
                                  value: $model.renderSettings.paddingFraction, range: 0...0.25)
@@ -229,6 +240,20 @@ struct GeneralPanel: View {
                z.enabled = $0
                model.renderSettings.autoZoom = z
                model.regenerateAutoZooms() }
+    }
+
+    private var motion3DEnabled: Binding<Bool> {
+        Binding { model.renderSettings.motion3D?.enabled ?? false }
+        set: { enabled in
+               model.renderSettings.motion3D = enabled
+                   ? Motion3DSettings(enabled: true,
+                                       strength: model.renderSettings.motion3D?.strength ?? 0.5)
+                   : nil }
+    }
+
+    private var motion3DStrength: Binding<Double> {
+        Binding { model.renderSettings.motion3D?.strength ?? 0.5 }
+        set: { model.renderSettings.motion3D = Motion3DSettings(enabled: true, strength: $0) }
     }
 
     private var solidColor: Binding<Color> {
