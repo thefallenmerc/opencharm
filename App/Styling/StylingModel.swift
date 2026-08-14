@@ -173,11 +173,20 @@ final class StylingModel: ObservableObject {
 
     // MARK: Privacy blur boxes
 
+    /// The toolbar's draw tools: the original privacy blur plus one per `AnnotationSpec.Kind`.
+    /// `.blur` maps to a `BlurBoxSpec`; everything else maps to an `AnnotationSpec` of the
+    /// matching kind.
+    enum AnnotationTool: String, CaseIterable {
+        case blur, text, rectangle, ellipse, arrow, spotlight
+    }
+
     /// Selection is shared by the timeline lane and the canvas overlay: selecting in either
     /// place shows the resize chrome in both.
     @Published var selectedBlurID: String?
-    /// Armed by the toolbar "Blur" button; the canvas overlay then turns a drag into a new box.
-    @Published var isDrawingBlur = false
+    /// Armed by one of the toolbar's annotation chips; the canvas overlay then turns a drag
+    /// into a new box/shape/arrow of that kind (`.blur` covers the original privacy-blur tool).
+    /// `nil` = not drawing. Tapping an armed chip again disarms it.
+    @Published var drawTool: AnnotationTool?
 
     var blurBoxes: [BlurBoxSpec] { renderSettings.blurBoxes ?? [] }
 
@@ -191,6 +200,7 @@ final class StylingModel: ObservableObject {
                                rect: rect)
         renderSettings.blurBoxes = (blurBoxes + [spec]).sorted { $0.start < $1.start }
         selectedBlurID = spec.id
+        selectedAnnotationID = nil
         return spec
     }
 
@@ -224,10 +234,71 @@ final class StylingModel: ObservableObject {
     }
 
     /// Select (or deselect with nil). Selecting seeks into the box's time range when the
-    /// playhead is outside it, so the blur is visible on the preview while editing.
+    /// playhead is outside it, so the blur is visible on the preview while editing. Mutually
+    /// exclusive with annotation selection — only one editor row shows at a time.
     func selectBlur(_ id: String?) {
         selectedBlurID = id
+        if id != nil { selectedAnnotationID = nil }
         guard let id, let spec = blurBoxes.first(where: { $0.id == id }) else { return }
+        if currentTime < spec.start || currentTime > spec.end {
+            seek(to: spec.start + min(0.05, (spec.end - spec.start) / 2))
+        }
+    }
+
+    // MARK: Drawn annotations (text, shapes, arrows, spotlight)
+
+    /// Selection is shared by the timeline lane and the canvas overlay, same as
+    /// `selectedBlurID`. Mutually exclusive with it (and with the transport's zoom/segment
+    /// selection — see `StudioTransport`).
+    @Published var selectedAnnotationID: String?
+
+    var annotations: [AnnotationSpec] { renderSettings.annotations ?? [] }
+
+    /// Creates a 2-second annotation at the playhead over `rect` (normalized content space) and
+    /// selects it. Text annotations start with placeholder copy so they're never blank on
+    /// creation; arrows carry their endpoints separately (`rect` is just their bounding box).
+    @discardableResult
+    func addAnnotation(kind: AnnotationSpec.Kind, rect: CGRect,
+                       arrowStart: CGPoint? = nil, arrowEnd: CGPoint? = nil) -> AnnotationSpec {
+        let start = min(max(0, currentTime), max(0, duration - 0.5))
+        let end = duration > 0 ? min(duration, start + 2) : start + 2
+        let spec = AnnotationSpec(id: UUID().uuidString, kind: kind.rawValue, start: start,
+                                  end: max(end, start + 0.5), rect: rect,
+                                  text: kind == .text ? "Text" : nil,
+                                  arrowStart: arrowStart, arrowEnd: arrowEnd)
+        renderSettings.annotations = (annotations + [spec]).sorted { $0.start < $1.start }
+        selectedAnnotationID = spec.id
+        selectedBlurID = nil
+        return spec
+    }
+
+    func updateAnnotation(_ spec: AnnotationSpec) {
+        guard annotations.contains(where: { $0.id == spec.id }) else { return }
+        renderSettings.annotations = annotations.map { $0.id == spec.id ? spec : $0 }
+            .sorted { $0.start < $1.start }
+    }
+
+    /// Resizes an annotation's time span (composition seconds), clamped to a minimum length.
+    func resizeAnnotation(_ id: String, start: Double? = nil, end: Double? = nil) {
+        guard let spec = annotations.first(where: { $0.id == id }) else { return }
+        let minLen = 0.2
+        var s = spec
+        if let start { s.start = min(max(0, start), s.end - minLen) }
+        if let end { s.end = max(min(max(duration, minLen), end), s.start + minLen) }
+        updateAnnotation(s)
+    }
+
+    func deleteAnnotation(_ id: String) {
+        renderSettings.annotations = annotations.filter { $0.id != id }
+        if selectedAnnotationID == id { selectedAnnotationID = nil }
+    }
+
+    /// Select (or deselect with nil). Selecting seeks into the annotation's time range when the
+    /// playhead is outside it, mirroring `selectBlur`. Mutually exclusive with blur selection.
+    func selectAnnotation(_ id: String?) {
+        selectedAnnotationID = id
+        if id != nil { selectedBlurID = nil }
+        guard let id, let spec = annotations.first(where: { $0.id == id }) else { return }
         if currentTime < spec.start || currentTime > spec.end {
             seek(to: spec.start + min(0.05, (spec.end - spec.start) / 2))
         }

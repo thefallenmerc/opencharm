@@ -12,7 +12,7 @@ struct StudioCanvas: View {
             ZStack {
                 PlayerView(player: model.player)
                 WebcamDragOverlay(model: model)
-                BlurBoxOverlay(model: model)
+                AnnotationOverlay(model: model)
             }
             .aspectRatio(model.canvasSize.width / max(model.canvasSize.height, 1),
                          contentMode: .fit)
