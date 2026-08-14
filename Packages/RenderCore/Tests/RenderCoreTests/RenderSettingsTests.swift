@@ -61,5 +61,6 @@ final class RenderSettingsTests: XCTestCase {
         XCTAssertNil(s.zooms); XCTAssertNil(s.trimStart); XCTAssertNil(s.trimEnd)
         XCTAssertNil(s.autoZoom)
         XCTAssertNil(s.motion3D) // 3D motion is additive too: absent = off, renders flat
+        XCTAssertNil(s.cursorStyle) // cursor styles are additive too: absent = classic
     }
 }

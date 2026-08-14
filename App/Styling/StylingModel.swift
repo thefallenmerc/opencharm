@@ -50,16 +50,19 @@ final class StylingModel: ObservableObject {
     private var isLoaded = false
     /// New recordings hide the system cursor; the compositor draws this synthetic pointer instead.
     var hasSyntheticCursor: Bool { package.manifest.hidesSystemCursor ?? false }
-    private lazy var cursorImage = CursorImage.make()
-    private lazy var cursorHandImage = CursorImage.pointingHand()
     /// The full pointer track goes to the builder regardless of the synthetic cursor: it also
-    /// drives the zoomed viewport's cursor-follow pan. Drawing is gated by `cursorImage` being
+    /// drives the zoomed viewport's cursor-follow pan. Drawing is gated by `cursorArt` being
     /// non-nil, so recordings that kept the system cursor never get a second pointer.
     private var cursorTrack: [CursorSample] { cursorSamples }
     /// Cursor inputs for the exporter (mirrors what the preview uses).
     var exportCursorSamples: [CursorSample] { cursorTrack }
-    var exportCursorImage: CIImage? { hasSyntheticCursor ? cursorImage : nil }
-    var exportCursorHandImage: CIImage? { hasSyntheticCursor ? cursorHandImage : nil }
+    /// The selected cursor style's art, or `nil` when this recording kept the system cursor.
+    /// `nil`/unrecognized `renderSettings.cursorStyle` falls back to `.classic`, which is
+    /// byte-identical to the pointer this app drew before styles existed.
+    var cursorArt: CursorArt? {
+        guard hasSyntheticCursor else { return nil }
+        return (CursorStyle(rawValue: renderSettings.cursorStyle ?? "classic") ?? .classic).art
+    }
 
     init(package: ProjectPackage, savedArchiveURL: URL? = nil) {
         self.package = package
@@ -542,8 +545,7 @@ final class StylingModel: ObservableObject {
             let built = try await ProjectCompositionBuilder.build(
                 timeline: timeline, settings: settings, canvasSize: canvas,
                 backgroundImage: bg, clicks: clicks,
-                cursorSamples: cursorTrack, cursorImage: exportCursorImage,
-                cursorHandImage: exportCursorHandImage)
+                cursorSamples: cursorTrack, cursorArt: cursorArt)
             guard !Task.isCancelled else { return }
             duration = built.composition.duration.seconds
             let item = AVPlayerItem(asset: built.composition)
@@ -592,8 +594,7 @@ final class StylingModel: ObservableObject {
                 let built = try await ProjectCompositionBuilder.build(
                     timeline: timeline, settings: settings, canvasSize: canvas,
                     backgroundImage: bg, clicks: clicks,
-                    cursorSamples: cursorTrack, cursorImage: exportCursorImage,
-                cursorHandImage: exportCursorHandImage)
+                    cursorSamples: cursorTrack, cursorArt: cursorArt)
                 guard !Task.isCancelled else { return }
                 item.videoComposition = built.videoComposition
                 if player.rate == 0 { // refresh the paused frame

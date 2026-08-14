@@ -93,6 +93,10 @@ public struct RenderSettings: Codable, Equatable, Sendable {
     /// Synthetic-pointer height as a fraction of canvas height (before zoom magnification). `nil` =
     /// the default. Only used when the recording hid the system cursor.
     public var cursorSize: Double?
+    /// Selected cursor art style's raw value (see `CursorStyle` in the App layer). Additive/
+    /// optional: `nil`, or an unrecognized raw value from a newer app version, falls back to
+    /// classic — the pre-styles look. Only used when the recording hid the system cursor.
+    public var cursorStyle: String?
     /// Output canvas aspect preset. Additive/optional: `nil` = `.auto` (match the recording).
     public var aspect: AspectPreset?
     /// Global playback speed (0.5–2). Preview plays at this rate; export retimes the composition.
@@ -121,7 +125,8 @@ public struct RenderSettings: Codable, Equatable, Sendable {
                 shadow: ShadowSettings, webcam: WebcamSettings,
                 autoZoom: AutoZoomSettings? = nil,
                 zooms: [ZoomSpec]? = nil, trimStart: Double? = nil, trimEnd: Double? = nil,
-                cursorSize: Double? = nil, aspect: AspectPreset? = nil,
+                cursorSize: Double? = nil, cursorStyle: String? = nil,
+                aspect: AspectPreset? = nil,
                 playbackSpeed: Double? = nil, backgroundBlur: Double? = nil,
                 splits: [Double]? = nil, cuts: [CutRange]? = nil,
                 blurBoxes: [BlurBoxSpec]? = nil, annotations: [AnnotationSpec]? = nil,
@@ -136,6 +141,7 @@ public struct RenderSettings: Codable, Equatable, Sendable {
         self.trimStart = trimStart
         self.trimEnd = trimEnd
         self.cursorSize = cursorSize
+        self.cursorStyle = cursorStyle
         self.aspect = aspect
         self.playbackSpeed = playbackSpeed
         self.backgroundBlur = backgroundBlur

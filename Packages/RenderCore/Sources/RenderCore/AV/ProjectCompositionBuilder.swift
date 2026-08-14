@@ -15,8 +15,7 @@ public enum ProjectCompositionBuilder {
                              backgroundImage: CIImage?,
                              clicks: [ClickEvent] = [],
                              cursorSamples: [CursorSample] = [],
-                             cursorImage: CIImage? = nil,
-                             cursorHandImage: CIImage? = nil,
+                             cursorArt: CursorArt? = nil,
                              retimeForExport: Bool = false) async throws -> BuiltComposition {
         let composition = AVMutableComposition()
 
@@ -117,8 +116,7 @@ public enum ProjectCompositionBuilder {
             screenTrackID: screenID, webcamTrackID: webcamID,
             settings: settings, backgroundImage: backgroundImage,
             zoomSegments: zoomSegments,
-            cursorSamples: samples, cursorImage: cursorImage,
-            cursorHandImage: cursorHandImage,
+            cursorSamples: samples, cursorArt: cursorArt,
             cursorSize: settings.cursorSize ?? 0.04,
             clickTimes: clickTimes, blurBoxes: blurBoxes, annotations: annotations)]
 

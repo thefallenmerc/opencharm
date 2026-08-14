@@ -121,8 +121,11 @@ public final class Compositor {
         guard img.extent.height > 0, h > 0 else { return bg }
         let s = h / img.extent.height
         let scaled = img.transformed(by: CGAffineTransform(scaleX: s, y: s))
+        // Anchor the art's HOTSPOT (not always its top-left corner) at the pointer point.
+        // Hotspot .zero collapses to the original top-left anchoring — byte-identical.
         let positioned = scaled.transformed(by: CGAffineTransform(
-            translationX: px - scaled.extent.minX, y: py - scaled.extent.maxY))
+            translationX: px - scaled.extent.minX - cursor.hotspot.x * scaled.extent.width,
+            y: py - scaled.extent.maxY + cursor.hotspot.y * scaled.extent.height))
         // Drop shadow: the pointer's silhouette, offset down-right and blurred.
         let silhouette = positioned.applyingFilter("CIColorMatrix", parameters: [
             "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0),

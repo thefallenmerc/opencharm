@@ -19,8 +19,7 @@ final class CharmInstruction: NSObject, AVVideoCompositionInstructionProtocol {
     let backgroundImage: CIImage?
     let zoomSegments: [ZoomSegment]
     let cursorSamples: [CursorSample]
-    let cursorImage: CIImage?
-    let cursorHandImage: CIImage?
+    let cursorArt: CursorArt?
     let cursorSize: Double
     let clickTimes: [Double]
     let blurBoxes: [BlurBoxSpec]
@@ -29,8 +28,8 @@ final class CharmInstruction: NSObject, AVVideoCompositionInstructionProtocol {
     init(timeRange: CMTimeRange, screenTrackID: CMPersistentTrackID,
          webcamTrackID: CMPersistentTrackID?, settings: RenderSettings,
          backgroundImage: CIImage?, zoomSegments: [ZoomSegment] = [],
-         cursorSamples: [CursorSample] = [], cursorImage: CIImage? = nil,
-         cursorHandImage: CIImage? = nil, cursorSize: Double = 0.04,
+         cursorSamples: [CursorSample] = [], cursorArt: CursorArt? = nil,
+         cursorSize: Double = 0.04,
          clickTimes: [Double] = [], blurBoxes: [BlurBoxSpec] = [],
          annotations: [AnnotationSpec] = []) {
         self.timeRange = timeRange
@@ -40,8 +39,7 @@ final class CharmInstruction: NSObject, AVVideoCompositionInstructionProtocol {
         self.backgroundImage = backgroundImage
         self.zoomSegments = zoomSegments
         self.cursorSamples = cursorSamples
-        self.cursorImage = cursorImage
-        self.cursorHandImage = cursorHandImage
+        self.cursorArt = cursorArt
         self.cursorSize = cursorSize
         self.clickTimes = clickTimes
         self.blurBoxes = blurBoxes
@@ -124,15 +122,18 @@ public final class CharmVideoCompositor: NSObject, AVVideoCompositing {
                                     zoomProgress: zoom.progress,
                                     settings: instruction.settings.motion3D)
         var cursor: CursorFrame?
-        if let img = instruction.cursorImage,
+        if let art = instruction.cursorArt,
            let sample = CursorTrack.sample(at: t, samples: instruction.cursorSamples) {
             // Pointer shape follows the recorded cursor type; the click pulse shrinks it
-            // briefly on mouse-down (scaling the size fraction keeps the tip anchored).
-            let image = sample.cursorType == "pointingHand"
-                ? (instruction.cursorHandImage ?? img) : img
+            // briefly on mouse-down (scaling the size fraction keeps the hotspot anchored).
+            // A style with no distinct hand art falls back to the arrow — image and hotspot
+            // together, so the fallback art still anchors correctly.
+            let usesHand = sample.cursorType == "pointingHand" && art.hand != nil
+            let image = usesHand ? art.hand! : art.arrow
+            let hotspot = usesHand ? art.handHotspot : art.hotspot
             let pulse = CursorPulse.scale(at: t, clicks: instruction.clickTimes)
             cursor = CursorFrame(image: image, point: sample.point,
-                                 sizeFraction: instruction.cursorSize * pulse)
+                                 sizeFraction: instruction.cursorSize * pulse, hotspot: hotspot)
         }
         let rendered = compositor.render(
             RenderInputs(screen: screenImage, webcam: webcamImage,

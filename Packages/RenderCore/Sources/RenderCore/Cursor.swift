@@ -20,8 +20,12 @@ public struct CursorFrame {
     public var image: CIImage
     public var point: CGPoint
     public var sizeFraction: Double
-    public init(image: CIImage, point: CGPoint, sizeFraction: Double) {
+    /// Where in `image` the pointer position lands, normalized 0…1 top-left origin. `.zero`
+    /// (the default) reproduces the pre-hotspot behavior: the art's top-left corner is the tip.
+    public var hotspot: CGPoint
+    public init(image: CIImage, point: CGPoint, sizeFraction: Double, hotspot: CGPoint = .zero) {
         self.image = image; self.point = point; self.sizeFraction = sizeFraction
+        self.hotspot = hotspot
     }
 }
 
